@@ -123,7 +123,7 @@ class IHN(nn.Module):
         fmap1 = fmap1_64.float()
         fmap2 = fmap2_64.float()
 
-        # print(fmap1.shape, fmap2.shape)
+        print(fmap1.shape, fmap2.shape)
         corr_fn = CorrBlock(fmap1, fmap2, num_levels=corr_level, radius=corr_radius)
         coords0, coords1 = self.initialize_flow_4(image1)
         # print(coords0.shape, coords1.shape)
@@ -212,17 +212,18 @@ class STHN():
     def set_input(self, A, B, flow_gt=None):
         self.image_1_ori = A.to(self.device, non_blocking=True)
         self.image_2 = B.to(self.device, non_blocking=True)
-        self.flow_gt = flow_gt.to(self.device, non_blocking=True)
-        if self.flow_gt is not None:
-            if self.args.vis_all:
-                self.real_warped_image_2 = mywarp(self.image_2, self.flow_gt, self.four_point_org_single) # Comment for performance evaluation 
-            self.flow_4cor = torch.zeros((self.flow_gt.shape[0], 2, 2, 2)).to(self.flow_gt.device)
-            self.flow_4cor[:, :, 0, 0] = self.flow_gt[:, :, 0, 0]
-            self.flow_4cor[:, :, 0, 1] = self.flow_gt[:, :, 0, -1]
-            self.flow_4cor[:, :, 1, 0] = self.flow_gt[:, :, -1, 0]
-            self.flow_4cor[:, :, 1, 1] = self.flow_gt[:, :, -1, -1]
-        else:
-            self.real_warped_image_2 = None
+        # if self.flow_gt is not None:
+        #     self.flow_gt = flow_gt.to(self.device, non_blocking=True)
+
+        #     if self.args.vis_all:
+        #         self.real_warped_image_2 = mywarp(self.image_2, self.flow_gt, self.four_point_org_single) # Comment for performance evaluation 
+        #     self.flow_4cor = torch.zeros((self.flow_gt.shape[0], 2, 2, 2)).to(self.flow_gt.device)
+        #     self.flow_4cor[:, :, 0, 0] = self.flow_gt[:, :, 0, 0]
+        #     self.flow_4cor[:, :, 0, 1] = self.flow_gt[:, :, 0, -1]
+        #     self.flow_4cor[:, :, 1, 0] = self.flow_gt[:, :, -1, 0]
+        #     self.flow_4cor[:, :, 1, 1] = self.flow_gt[:, :, -1, -1]
+        # else:
+        self.real_warped_image_2 = None
         self.image_1 = F.interpolate(self.image_1_ori, size=self.args.resize_width, mode='bilinear', align_corners=True, antialias=True)
         
     def forward(self, for_training=False):

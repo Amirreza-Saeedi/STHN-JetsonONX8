@@ -7,7 +7,7 @@ from torch import nn
 import torchvision
 from os.path import join
 from transformers import ViTModel
-from google_drive_downloader import GoogleDriveDownloader as gdd
+#from google_drive_downloader import GoogleDriveDownloader as gdd
 
 from model.cct import cct_14_7x2_384
 from model.aggregation import Flatten
@@ -152,9 +152,9 @@ def get_pretrained_model(args):
         model_name = args.backbone + "_" + args.pretrain
     file_path = join("data", "pretrained_nets", model_name +".pth")
     
-    if not os.path.exists(file_path):
-        gdd.download_file_from_google_drive(file_id=PRETRAINED_MODELS[model_name],
-                                            dest_path=file_path)
+    # if not os.path.exists(file_path):
+    #     gdd.download_file_from_google_drive(file_id=PRETRAINED_MODELS[model_name],
+    #                                         dest_path=file_path)
     state_dict = torch.load(file_path, map_location=torch.device('cpu'))
     if "model_state_dict" in state_dict:
         state_dict = state_dict["model_state_dict"]
