@@ -112,11 +112,12 @@ def test(args, wandb_log):
     folder_name = "maps_results/farm"
     all_corners = []
     times = []
-    for i in range(100):
+    for i in range(1):
         try:
             # مسیر تصاویر با شماره i
-            img1_path = f"/home/rpl/Map Matching/STHN-JetsonONX8/js_datasets/qomFly2/satellite/tile_{i+165}.png"
-            img2_path = f"/home/rpl/Map Matching/STHN-JetsonONX8/js_datasets/qomFly2/thermal/frame_{i}.png"
+            
+            img1_path = f"js_datasets/qomFly2/satellite/tile_{i+165}.png"
+            img2_path = f"js_datasets/qomFly2/thermal/frame_{i}.png"
     
             # خواندن تصاویر
             img1 = F.to_tensor(Image.open(img1_path).convert("RGB")).unsqueeze(0)
