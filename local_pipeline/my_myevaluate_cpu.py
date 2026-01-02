@@ -87,8 +87,8 @@ def test(args, wandb_log):
     times = []
     for i in range(50):
         try:
-            img1_path = f"/home/rpl/Desktop/RPL/Map-Matching/STHN-JetsonONX8/js_datasets/qomFly2/satellite/tile_{i+165}.png"
-            img2_path = f"/home/rpl/Desktop/RPL/Map-Matching/STHN-JetsonONX8/js_datasets/qomFly2/thermal/frame_{i}.png"
+            img1_path = f"js_datasets/qomFly2/satellite/tile_{i+165}.png"
+            img2_path = f"js_datasets/qomFly2/thermal/frame_{i}.png"
     
             img1 = F.to_tensor(Image.open(img1_path).convert("RGB")).unsqueeze(0)
             img2 = (base_transform(query_transform(Image.open(img2_path)))).unsqueeze(0)
@@ -131,7 +131,7 @@ def test(args, wandb_log):
 
     columns = ["image_index", "x1", "y1", "x2", "y2", "x3", "y3", "x4", "y4"]
     df = pd.DataFrame(all_corners, columns=columns)
-    df.to_excel(f"test/predicted.xlsx", index=False)
+    df.to_excel(f"js_excels/predicted.xlsx", index=False)
     print("📁 Saved all corner points to four_point_1_mul6.xlsx")
 
 
