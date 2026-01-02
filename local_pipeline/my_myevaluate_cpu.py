@@ -85,7 +85,7 @@ def test(args, wandb_log):
     folder_name = "maps_results/farm"
     all_corners = []
     times = []
-    for i in range(50):
+    for i in range(5):
         try:
             img1_path = f"js_datasets/qomFly2/satellite/tile_{i+165}.png"
             img2_path = f"js_datasets/qomFly2/thermal/frame_{i}.png"
@@ -131,7 +131,7 @@ def test(args, wandb_log):
 
     columns = ["image_index", "x1", "y1", "x2", "y2", "x3", "y3", "x4", "y4"]
     df = pd.DataFrame(all_corners, columns=columns)
-    df.to_excel(f"js_excels/predicted.xlsx", index=False)
+    df.to_excel(f"js_excels/predicted_cpu.xlsx", index=False)
     print("📁 Saved all corner points to four_point_1_mul6.xlsx")
 
 

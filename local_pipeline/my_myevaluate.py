@@ -112,7 +112,7 @@ def test(args, wandb_log):
     folder_name = "maps_results/farm"
     all_corners = []
     times = []
-    for i in range(1):
+    for i in range(50):
         try:
             # مسیر تصاویر با شماره i
             
@@ -142,8 +142,8 @@ def test(args, wandb_log):
             four_point_1_mul6 = four_point_1 * 6
             center = four_point_1_mul6.mean(dim=1)  # شکل (1,2)
             center = tuple(center[0].tolist())
-            print(center)
-            print(four_point_1_mul6)
+            # print(center)
+            # print(four_point_1_mul6)
             end_time = time.time()
             elapsed = end_time - start_time
             times.append(elapsed)
