@@ -5,6 +5,30 @@ import subprocess
 from typing import Optional
 
 
+def _normalize_path(path: str) -> str:
+    # The notebook historically used Windows-style paths (e.g., trt\one_stage\x.onnx).
+    # On Linux, backslashes are literal characters and will break file resolution.
+    if os.sep == "/":
+        path = path.replace("\\", "/")
+    return path
+
+
+def _trtexec_help(trtexec_path: str) -> str:
+    # trtexec flag names differ across TensorRT versions.
+    # We probe --help once and select compatible flags.
+    try:
+        result = subprocess.run(
+            [trtexec_path, "--help"],
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
+        return result.stdout or ""
+    except Exception:
+        return ""
+
+
 def _find_trtexec(explicit_path: Optional[str]) -> str:
     if explicit_path:
         if not os.path.exists(explicit_path):
@@ -52,15 +76,50 @@ def main():
     args = ap.parse_args()
 
     trtexec = _find_trtexec(args.trtexec)
-    os.makedirs(os.path.dirname(args.engine) or ".", exist_ok=True)
+
+    # Pre-flight: TensorRT 10.x plugin library on Jetson can depend on cuDLA.
+    # If it's missing, trtexec fails before parsing the ONNX.
+    if os.name == "posix" and os.uname().machine in {"aarch64", "arm64"}:
+        cudla_candidates = [
+            "/lib/aarch64-linux-gnu/libcudla.so.1",
+            "/usr/lib/aarch64-linux-gnu/libcudla.so.1",
+            "/usr/lib/aarch64-linux-gnu/tegra/libcudla.so.1",
+        ]
+        if not any(os.path.exists(p) for p in cudla_candidates):
+            print(
+                "WARNING: libcudla.so.1 not found. TensorRT may fail to load libnvinfer_plugin.\n"
+                "On Jetson/Ubuntu, install the cuDLA runtime, e.g.:\n"
+                "  sudo apt-get update && sudo apt-get install -y libcudla-12-6\n"
+                "Then run: sudo ldconfig\n"
+            )
+
+    onnx_path = _normalize_path(args.onnx)
+    engine_path = _normalize_path(args.engine)
+    os.makedirs(os.path.dirname(engine_path) or ".", exist_ok=True)
+
+    help_text = _trtexec_help(trtexec)
+    supports_explicit_batch = "--explicitBatch" in help_text
+    supports_workspace = "--workspace" in help_text
+    supports_mem_pool = "--memPoolSize" in help_text
 
     cmd = [
         trtexec,
-        f"--onnx={args.onnx}",
-        f"--saveEngine={args.engine}",
-        "--explicitBatch",
-        f"--workspace={args.workspace}",
+        f"--onnx={onnx_path}",
+        f"--saveEngine={engine_path}",
     ]
+
+    # TensorRT 10+ removed some legacy flags.
+    if supports_explicit_batch:
+        cmd.append("--explicitBatch")
+
+    if supports_mem_pool:
+        # Default unit is MiB per trtexec help.
+        cmd.append(f"--memPoolSize=workspace:{args.workspace}")
+    elif supports_workspace:
+        cmd.append(f"--workspace={args.workspace}")
+    else:
+        # No known workspace flag; proceed without setting it.
+        pass
 
     if args.fp16:
         cmd.append("--fp16")
@@ -85,7 +144,7 @@ def main():
     print(" ".join(cmd))
 
     subprocess.run(cmd, check=True)
-    print(f"Wrote: {args.engine}")
+    print(f"Wrote: {engine_path}")
 
 
 if __name__ == "__main__":
