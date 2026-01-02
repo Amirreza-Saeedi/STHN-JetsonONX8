@@ -19,6 +19,92 @@ import datasets_4cor_img as datasets
 import numpy as np
 
 
+def _get_perspective_transform_onnx_safe(points_src: torch.Tensor, points_dst: torch.Tensor) -> torch.Tensor:
+    """Compute homography H mapping points_src -> points_dst.
+
+    ONNX-friendly alternative to kornia.geometry.transform.get_perspective_transform,
+    which may dispatch to torch.linalg.solve (aten::linalg_solve) that is not exported
+    by PyTorch's ONNX exporter.
+
+    Args:
+        points_src: (B, 4, 2)
+        points_dst: (B, 4, 2)
+
+    Returns:
+        H: (B, 3, 3)
+    """
+
+    # Closed-form homography from unit square to quadrilateral, then scale to pixels.
+    # This avoids torch.linalg.solve / torch.inverse which the ONNX exporter cannot lower.
+    # Point order is expected as: TL, TR, BL, BR.
+
+    eps = 1e-6
+
+    # Infer width/height from src rectangle (TL assumed to be 0,0)
+    w = points_src[:, 1, 0].clamp_min(eps)  # (B,)
+    h = points_src[:, 2, 1].clamp_min(eps)  # (B,)
+    w_ = w.unsqueeze(-1)
+    h_ = h.unsqueeze(-1)
+
+    # Normalize destination corners to unit square coordinates
+    xd = points_dst[..., 0] / w_
+    yd = points_dst[..., 1] / h_
+
+    x0, y0 = xd[:, 0], yd[:, 0]
+    x1, y1 = xd[:, 1], yd[:, 1]
+    x2, y2 = xd[:, 2], yd[:, 2]
+    x3, y3 = xd[:, 3], yd[:, 3]
+
+    dx1 = x1 - x2
+    dx2 = x3 - x2
+    dx3 = x0 - x1 + x2 - x3
+    dy1 = y1 - y2
+    dy2 = y3 - y2
+    dy3 = y0 - y1 + y2 - y3
+
+    den = (dx1 * dy2 - dx2 * dy1).clamp_min(eps)
+    g = (dx3 * dy2 - dx2 * dy3) / den
+    hh = (dx1 * dy3 - dx3 * dy1) / den
+
+    a = x1 - x0 + g * x1
+    b = x3 - x0 + hh * x3
+    c = x0
+    d = y1 - y0 + g * y1
+    e = y3 - y0 + hh * y3
+    f = y0
+
+    H_norm = torch.stack(
+        [
+            torch.stack([a, b, c], dim=-1),
+            torch.stack([d, e, f], dim=-1),
+            torch.stack([g, hh, torch.ones_like(g)], dim=-1),
+        ],
+        dim=-2,
+    )  # (B, 3, 3)
+
+    # Convert unit-square homography to pixel-space homography.
+    # H_pixel = S_inv * H_norm * S, where S = diag([1/w, 1/h, 1]) and S_inv = diag([w, h, 1])
+    zeros = torch.zeros_like(w)
+    ones = torch.ones_like(w)
+    S = torch.stack(
+        [
+            torch.stack([1.0 / w, zeros, zeros], dim=-1),
+            torch.stack([zeros, 1.0 / h, zeros], dim=-1),
+            torch.stack([zeros, zeros, ones], dim=-1),
+        ],
+        dim=-2,
+    )
+    S_inv = torch.stack(
+        [
+            torch.stack([w, zeros, zeros], dim=-1),
+            torch.stack([zeros, h, zeros], dim=-1),
+            torch.stack([zeros, zeros, ones], dim=-1),
+        ],
+        dim=-2,
+    )
+    return torch.bmm(torch.bmm(S_inv, H_norm), S)
+
+
 def _autocast(device_type, enabled):
     return torch.autocast(device_type=device_type, enabled=enabled)
 
@@ -52,8 +138,12 @@ class IHN(nn.Module):
         four_point_new = four_point_org + four_point
         four_point_org = four_point_org.flatten(2).permute(0, 2, 1).contiguous()
         four_point_new = four_point_new.flatten(2).permute(0, 2, 1).contiguous()
-        H = tgm.get_perspective_transform(four_point_org, four_point_new)
-        gridy, gridx = torch.meshgrid(torch.linspace(0, self.args.resize_width//4-1, steps=self.args.resize_width//4), torch.linspace(0, self.args.resize_width//4-1, steps=self.args.resize_width//4))
+        H = _get_perspective_transform_onnx_safe(four_point_org, four_point_new)
+        gridy, gridx = torch.meshgrid(
+            torch.linspace(0, self.args.resize_width // 4 - 1, steps=self.args.resize_width // 4),
+            torch.linspace(0, self.args.resize_width // 4 - 1, steps=self.args.resize_width // 4),
+            indexing='ij',
+        )
         points = torch.cat((gridx.flatten().unsqueeze(0), gridy.flatten().unsqueeze(0), torch.ones((1, self.args.resize_width//4 * self.args.resize_width//4))),
                            dim=0).unsqueeze(0).repeat(H.shape[0], 1, 1).to(four_point.device)
         points_new = H.bmm(points)
@@ -78,8 +168,12 @@ class IHN(nn.Module):
         four_point_new = four_point_org + four_point
         four_point_org = four_point_org.flatten(2).permute(0, 2, 1).contiguous()
         four_point_new = four_point_new.flatten(2).permute(0, 2, 1).contiguous()
-        H = tgm.get_perspective_transform(four_point_org, four_point_new)
-        gridy, gridx = torch.meshgrid(torch.linspace(0, self.sz[3]-1, steps=self.sz[3]), torch.linspace(0, self.sz[2]-1, steps=self.sz[2]))
+        H = _get_perspective_transform_onnx_safe(four_point_org, four_point_new)
+        gridy, gridx = torch.meshgrid(
+            torch.linspace(0, self.sz[3] - 1, steps=self.sz[3]),
+            torch.linspace(0, self.sz[2] - 1, steps=self.sz[2]),
+            indexing='ij',
+        )
         points = torch.cat((gridx.flatten().unsqueeze(0), gridy.flatten().unsqueeze(0), torch.ones((1, self.sz[3] * self.sz[2]))),
                            dim=0).unsqueeze(0).repeat(self.sz[0], 1, 1).to(four_point.device)
         points_new = H.bmm(points)
