@@ -112,12 +112,12 @@ def test(args, wandb_log):
     folder_name = "maps_results/farm"
     all_corners = []
     times = []
-    for i in range(1):
+    for i in range(6):
         try:
             # مسیر تصاویر با شماره i
             
-            img1_path = f"js_datasets/qomFly2/satellite/tile_{i+165}.png"
-            img2_path = f"js_datasets/qomFly2/thermal/frame_{i}.png"
+            img1_path = f"js_datasets/qomFly2-400m/satellite/tile_{i+1011}.png"
+            img2_path = f"js_datasets/qomFly2-400m/thermal/frame_{i*3 +3096}.png"
     
             # خواندن تصاویر
             img1 = F.to_tensor(Image.open(img1_path).convert("RGB")).unsqueeze(0)
@@ -166,7 +166,7 @@ def test(args, wandb_log):
     # ذخیره در فایل Excel
     columns = ["image_index", "x1", "y1", "x2", "y2", "x3", "y3", "x4", "y4"]
     df = pd.DataFrame(all_corners, columns=columns)
-    df.to_excel(f"js_excels/predicted.xlsx", index=False)
+    df.to_excel(f"js_excels-gpu/predicted.xlsx", index=False)
     print("📁 Saved all corner points to four_point_1_mul6.xlsx")
 
 
