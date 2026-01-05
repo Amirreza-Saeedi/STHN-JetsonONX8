@@ -293,8 +293,8 @@ import time
 
 folder_name = "crops_1"
 # تنظیمات پایه
-input_dir = f"/content/drive/MyDrive/small_patches/"
-generated_save_dir = f"/content/drive/MyDrive/small_patches_thermal"
+input_dir = r"D:\RPL\Tiles\Dehat\to_thermal"
+generated_save_dir = r"D:\RPL\Tiles\Dehat\thermal"
 os.makedirs(generated_save_dir, exist_ok=True)
 
 # تنظیمات مدل
@@ -326,7 +326,7 @@ resized_transform = transforms.Compose(
 # بارگذاری و پردازش تصاویر
 times = []
 times2 = []
-for filename in os.listdir(input_dir):
+for i, filename in enumerate(os.listdir(input_dir)):
     if filename.endswith(('.png', '.jpg', '.jpeg','tif')):
         image_path = os.path.join(input_dir, filename)
         image = cv2.imread(image_path)
@@ -356,7 +356,7 @@ for filename in os.listdir(input_dir):
         end_time = time.time()
         elapsed = end_time - start_time
         times.append(elapsed)
-        print(f"✅ Cropped and processed image saved: {generated_image_path}")
+        print(f"✅ Cropped and processed image {i} saved: {generated_image_path}")
         
         
 
