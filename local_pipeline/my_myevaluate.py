@@ -2,7 +2,7 @@ import numpy as np
 import os
 import torch
 import argparse
-from model.network import STHN
+from local_pipeline.model.js_network_noKornia import STHN
 from utils import save_overlap_img, save_img, setup_seed, save_overlap_bbox_img
 import datasets_4cor_img as datasets
 import scipy.io as io
@@ -134,8 +134,8 @@ def test(args, wandb_log):
 
             # --- GRID CROP ---
 
-            img1_path = fr"D:\RPL\Tiles\Dehat\satellite\{i // TH + 1}.tif"
-            img2_path = fr"D:\RPL\Tiles\Dehat\thermal\{i // TH + 1}_{i % TH + 1}.tif"
+            img1_path = fr"D:/RPL/Tiles/Dehat/satellite/{i // TH + 1}.tif"
+            img2_path = fr"D:/RPL/Tiles/Dehat/thermal/{i // TH + 1}_{i % TH + 1}.tif"
 
             # خواندن تصاویر
             img1 = F.to_tensor(Image.open(img1_path).convert("RGB")).unsqueeze(0)
@@ -146,6 +146,10 @@ def test(args, wandb_log):
                 model.set_input(img1, img2)
                 model.forward()
                 four_pred = model.four_pred
+
+            # print('!!!four_pred')
+            # print(four_pred)
+
     
             # آماده‌سازی نقاط مرجع
             four_point_org_single = torch.zeros((1, 2, 2, 2))
@@ -184,7 +188,7 @@ def test(args, wandb_log):
     # ذخیره در فایل Excel
     columns = ["image_index", "x1", "y1", "x2", "y2", "x3", "y3", "x4", "y4", "sat", "th"]
     df = pd.DataFrame(all_corners, columns=columns)
-    df.to_excel(f"js_excels/predicted-dehat.xlsx", index=False)
+    df.to_excel(f"js_excels/predicted-dehat-noSVD.xlsx", index=False)
     print("📁 Saved all corner points to four_point_1_mul6.xlsx")
 
 

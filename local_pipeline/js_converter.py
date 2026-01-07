@@ -1,6 +1,6 @@
 import torch
 import parser
-from model.network import STHN
+from local_pipeline.model.js_network_noKornia import STHN
 
 def export_onnx(args):
     sthn = STHN(args)

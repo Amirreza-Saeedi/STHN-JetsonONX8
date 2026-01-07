@@ -1,6 +1,12 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+# Remove kornia imports
+# import kornia.geometry.transform as tgm
+# import kornia.geometry.bbox as bbox
+
+# Add the replacement functions at the top of your file
+
 import kornia.geometry.transform as tgm
 import kornia.geometry.bbox as bbox
 from update import GMA
@@ -18,71 +24,23 @@ import logging
 import datasets_4cor_img as datasets
 import numpy as np
 
-
-def _get_perspective_transform_onnx_safe(points_src: torch.Tensor, points_dst: torch.Tensor) -> torch.Tensor:
-    eps = 1e-6
-
-    w = points_src[:, 1, 0].clamp_min(eps)
-    h = points_src[:, 2, 1].clamp_min(eps)
-    w_ = w.unsqueeze(-1)
-    h_ = h.unsqueeze(-1)
-
-    xd = points_dst[..., 0] / w_
-    yd = points_dst[..., 1] / h_
-
-    x0, y0 = xd[:, 0], yd[:, 0]
-    x1, y1 = xd[:, 1], yd[:, 1]
-    x2, y2 = xd[:, 2], yd[:, 2]
-    x3, y3 = xd[:, 3], yd[:, 3]
-
-    dx1 = x1 - x2
-    dx2 = x3 - x2
-    dx3 = x0 - x1 + x2 - x3
-    dy1 = y1 - y2
-    dy2 = y3 - y2
-    dy3 = y0 - y1 + y2 - y3
-
-    den = (dx1 * dy2 - dx2 * dy1).clamp_min(eps)
-    g = (dx3 * dy2 - dx2 * dy3) / den
-    hh = (dx1 * dy3 - dx3 * dy1) / den
-
-    a = x1 - x0 + g * x1
-    b = x3 - x0 + hh * x3
-    c = x0
-    d = y1 - y0 + g * y1
-    e = y3 - y0 + hh * y3
-    f = y0
-
-    H_norm = torch.stack(
-        [
-            torch.stack([a, b, c], dim=-1),
-            torch.stack([d, e, f], dim=-1),
-            torch.stack([g, hh, torch.ones_like(g)], dim=-1),
-        ],
-        dim=-2,
-    )
-
-    zeros = torch.zeros_like(w)
-    ones = torch.ones_like(w)
-    S = torch.stack(
-        [
-            torch.stack([1.0 / w, zeros, zeros], dim=-1),
-            torch.stack([zeros, 1.0 / h, zeros], dim=-1),
-            torch.stack([zeros, zeros, ones], dim=-1),
-        ],
-        dim=-2,
-    )
-    S_inv = torch.stack(
-        [
-            torch.stack([w, zeros, zeros], dim=-1),
-            torch.stack([zeros, h, zeros], dim=-1),
-            torch.stack([zeros, zeros, ones], dim=-1),
-        ],
-        dim=-2,
-    )
-    return torch.bmm(torch.bmm(S_inv, H_norm), S)
-
 autocast = torch.cuda.amp.autocast
+import sys
+print(sys.path)
+from local_pipeline.model.js_kornia_replacement import (
+    get_perspective_transform_torch, 
+    crop_and_resize_torch,
+    bbox_generator_torch,
+    warp_perspective_torch
+)
+
+# Keep only the warp_perspective from kornia if it works for you
+import kornia.geometry.transform as tgm  # Only for warp_perspective
+
+# ... rest of your imports ...
+
+# In your IHN class, replace the get_perspective_transform calls:
+
 class IHN(nn.Module):
     def __init__(self, args, first_stage):
         super().__init__()
@@ -111,17 +69,32 @@ class IHN(nn.Module):
         four_point_new = four_point_org + four_point
         four_point_org = four_point_org.flatten(2).permute(0, 2, 1).contiguous()
         four_point_new = four_point_new.flatten(2).permute(0, 2, 1).contiguous()
-        H = _get_perspective_transform_onnx_safe(four_point_org, four_point_new)
-        gridy, gridx = torch.meshgrid(torch.linspace(0, self.args.resize_width//4-1, steps=self.args.resize_width//4), torch.linspace(0, self.args.resize_width//4-1, steps=self.args.resize_width//4))
-        points = torch.cat((gridx.flatten().unsqueeze(0), gridy.flatten().unsqueeze(0), torch.ones((1, self.args.resize_width//4 * self.args.resize_width//4))),
-                           dim=0).unsqueeze(0).repeat(H.shape[0], 1, 1).to(four_point.device)
+        
+        # REPLACED: Use custom implementation instead of kornia
+        H = get_perspective_transform_torch(four_point_org, four_point_new)
+        
+        gridy, gridx = torch.meshgrid(
+            torch.linspace(0, self.args.resize_width//4-1, steps=self.args.resize_width//4), 
+            torch.linspace(0, self.args.resize_width//4-1, steps=self.args.resize_width//4),
+            indexing='ij'
+        )
+        points = torch.cat(
+            (gridx.flatten().unsqueeze(0), 
+             gridy.flatten().unsqueeze(0), 
+             torch.ones((1, self.args.resize_width//4 * self.args.resize_width//4))),
+            dim=0
+        ).unsqueeze(0).repeat(H.shape[0], 1, 1).to(four_point.device)
+        
         points_new = H.bmm(points)
         if torch.isnan(points_new).any():
             raise KeyError("Some of transformed coords are NaN!")
         points_new = points_new / points_new[:, 2, :].unsqueeze(1)
         points_new = points_new[:, 0:2, :]
-        flow = torch.cat((points_new[:, 0, :].reshape(self.sz[0], self.sz[3], self.sz[2]).unsqueeze(1),
-                          points_new[:, 1, :].reshape(self.sz[0], self.sz[3], self.sz[2]).unsqueeze(1)), dim=1)
+        flow = torch.cat(
+            (points_new[:, 0, :].reshape(self.sz[0], self.sz[3], self.sz[2]).unsqueeze(1),
+             points_new[:, 1, :].reshape(self.sz[0], self.sz[3], self.sz[2]).unsqueeze(1)), 
+            dim=1
+        )
         return flow
 
     def get_flow_now_2(self, four_point):
@@ -137,15 +110,30 @@ class IHN(nn.Module):
         four_point_new = four_point_org + four_point
         four_point_org = four_point_org.flatten(2).permute(0, 2, 1).contiguous()
         four_point_new = four_point_new.flatten(2).permute(0, 2, 1).contiguous()
-        H = _get_perspective_transform_onnx_safe(four_point_org, four_point_new)
-        gridy, gridx = torch.meshgrid(torch.linspace(0, self.sz[3]-1, steps=self.sz[3]), torch.linspace(0, self.sz[2]-1, steps=self.sz[2]))
-        points = torch.cat((gridx.flatten().unsqueeze(0), gridy.flatten().unsqueeze(0), torch.ones((1, self.sz[3] * self.sz[2]))),
-                           dim=0).unsqueeze(0).repeat(self.sz[0], 1, 1).to(four_point.device)
+        
+        # REPLACED: Use custom implementation instead of kornia
+        H = get_perspective_transform_torch(four_point_org, four_point_new)
+        
+        gridy, gridx = torch.meshgrid(
+            torch.linspace(0, self.sz[3]-1, steps=self.sz[3]), 
+            torch.linspace(0, self.sz[2]-1, steps=self.sz[2]),
+            indexing='ij'
+        )
+        points = torch.cat(
+            (gridx.flatten().unsqueeze(0), 
+             gridy.flatten().unsqueeze(0), 
+             torch.ones((1, self.sz[3] * self.sz[2]))),
+            dim=0
+        ).unsqueeze(0).repeat(self.sz[0], 1, 1).to(four_point.device)
+        
         points_new = H.bmm(points)
         points_new = points_new / points_new[:, 2, :].unsqueeze(1)
         points_new = points_new[:, 0:2, :]
-        flow = torch.cat((points_new[:, 0, :].reshape(self.sz[0], self.sz[3], self.sz[2]).unsqueeze(1),
-                          points_new[:, 1, :].reshape(self.sz[0], self.sz[3], self.sz[2]).unsqueeze(1)), dim=1)
+        flow = torch.cat(
+            (points_new[:, 0, :].reshape(self.sz[0], self.sz[3], self.sz[2]).unsqueeze(1),
+             points_new[:, 1, :].reshape(self.sz[0], self.sz[3], self.sz[2]).unsqueeze(1)), 
+            dim=1
+        )
         return flow
 
     def initialize_flow_4(self, img):
@@ -303,83 +291,61 @@ class STHN():
             self.fake_warped_image_2 = mywarp(self.image_2, self.four_pred, self.four_point_org_single) # Comment for performance evaluation
 
     def get_cropped_st_images(self, image_1_ori, four_pred, fine_padding, detach=True, augment_two_stages=0):
+        # From four_pred to bbox coordinates
         four_point = four_pred + self.four_point_org_single
         x = four_point[:, 0]
         y = four_point[:, 1]
-
+        # Make it same scale as image_1_ori
         alpha = self.args.database_size / self.args.resize_width
         x[:, :, 0] = x[:, :, 0] * alpha
         x[:, :, 1] = (x[:, :, 1] + 1) * alpha
         y[:, 0, :] = y[:, 0, :] * alpha
         y[:, 1, :] = (y[:, 1, :] + 1) * alpha
-
+        # Crop
         left = torch.min(x.view(x.shape[0], -1), dim=1)[0]
         right = torch.max(x.view(x.shape[0], -1), dim=1)[0]
         top = torch.min(y.view(y.shape[0], -1), dim=1)[0]
         bottom = torch.max(y.view(y.shape[0], -1), dim=1)[0]
-
-        if augment_two_stages != 0:
+        
+        if augment_two_stages!=0:
             if self.args.augment_type == "bbox":
                 left += (torch.rand(left.shape).to(left.device) * 2 - 1) * augment_two_stages
                 right += (torch.rand(right.shape).to(right.device) * 2 - 1) * augment_two_stages
                 top += (torch.rand(top.shape).to(top.device) * 2 - 1) * augment_two_stages
                 bottom += (torch.rand(bottom.shape).to(bottom.device) * 2 - 1) * augment_two_stages
-            w = torch.max(torch.stack([right - left, bottom - top], dim=1), dim=1)[0]
-            c = torch.stack([(left + right) / 2, (bottom + top) / 2], dim=1)
+            w = torch.max(torch.stack([right-left, bottom-top], dim=1), dim=1)[0]
+            c = torch.stack([(left + right)/2, (bottom + top)/2], dim=1)
             if self.args.augment_type == "center":
                 w += torch.rand(w.shape).to(w.device) * augment_two_stages
                 c += (torch.rand(c.shape).to(c.device) * 2 - 1) * augment_two_stages
         else:
-            w = torch.max(torch.stack([right - left, bottom - top], dim=1), dim=1)[0]
-            c = torch.stack([(left + right) / 2, (bottom + top) / 2], dim=1)
-
+            w = torch.max(torch.stack([right-left, bottom-top], dim=1), dim=1)[0]
+            c = torch.stack([(left + right)/2, (bottom + top)/2], dim=1)
+        
         w_padded = w + 2 * fine_padding
         crop_top_left = c + torch.stack([-w_padded / 2, -w_padded / 2], dim=1)
         x_start = crop_top_left[:, 0]
         y_start = crop_top_left[:, 1]
-
+        
+        # REPLACED: Use custom bbox_generator instead of kornia
+        bbox_s = bbox_generator_torch(x_start, y_start, w_padded, w_padded)
+        
         delta = (w_padded / self.args.resize_width).unsqueeze(1).unsqueeze(1).unsqueeze(1)
-
-        B, C, H, W = image_1_ori.shape
-        out_hw = int(self.args.resize_width)
-
-        lin = torch.linspace(0.0, 1.0, out_hw, device=image_1_ori.device, dtype=image_1_ori.dtype)
-        gx = lin.view(1, 1, out_hw).expand(B, out_hw, out_hw)
-        gy = lin.view(1, out_hw, 1).expand(B, out_hw, out_hw)
-
-        x0 = x_start.view(B, 1, 1)
-        y0 = y_start.view(B, 1, 1)
-        ww = w_padded.view(B, 1, 1)
-
-        x_abs = x0 + gx * ww
-        y_abs = y0 + gy * ww
-
-        x_norm = (x_abs / (W - 1)) * 2 - 1
-        y_norm = (y_abs / (H - 1)) * 2 - 1
-        grid = torch.stack([x_norm, y_norm], dim=-1)
-
-        image_1_crop = F.grid_sample(
-            image_1_ori,
-            grid,
-            mode="bilinear",
-            padding_mode="zeros",
-            align_corners=True,
-        )
-
-        four_cor_bbox = torch.zeros((B, 2, 2, 2), device=image_1_ori.device, dtype=image_1_ori.dtype)
-        four_cor_bbox[:, 0, 0, 0] = x_start
-        four_cor_bbox[:, 1, 0, 0] = y_start
-        four_cor_bbox[:, 0, 0, 1] = x_start + w_padded
-        four_cor_bbox[:, 1, 0, 1] = y_start
-        four_cor_bbox[:, 0, 1, 0] = x_start
-        four_cor_bbox[:, 1, 1, 0] = y_start + w_padded
-        four_cor_bbox[:, 0, 1, 1] = x_start + w_padded
-        four_cor_bbox[:, 1, 1, 1] = y_start + w_padded
+        
+        # REPLACED: Use custom crop_and_resize instead of kornia
+        image_1_crop = crop_and_resize_torch(image_1_ori, bbox_s, 
+                                            (self.args.resize_width, self.args.resize_width))
+        
+        # swap bbox_s for flow_bbox calculation
+        bbox_s_swap = torch.stack([bbox_s[:, 0], bbox_s[:, 1], bbox_s[:, 3], bbox_s[:, 2]], dim=1)
+        four_cor_bbox = bbox_s_swap.permute(0, 2, 1).view(-1, 2, 2, 2)
         flow_bbox = four_cor_bbox - self.four_point_org_large_single
+        
         if detach:
             image_1_crop = image_1_crop.detach()
             delta = delta.detach()
             flow_bbox = flow_bbox.detach()
+        
         return image_1_crop, delta, flow_bbox
     
     def combine_coarse_fine(self, four_preds_list, four_pred, four_preds_list_fine, four_pred_fine, delta, flow_bbox, for_training):
@@ -432,8 +398,6 @@ class STHN():
 def mywarp(x, flow_pred, four_point_org_single, ue_std=None):
     """
     warp an image/tensor (im2) back to im1, according to the optical flow
-    x: [B, C, H, W] (im2)
-    flo: [B, 2, H, W] flow
     """
     if not torch.isnan(flow_pred).any():
         if flow_pred.shape[-1] != 2:
@@ -449,13 +413,18 @@ def mywarp(x, flow_pred, four_point_org_single, ue_std=None):
         
         four_point_org = four_point_org_single.repeat(flow_pred.shape[0],1,1,1).flatten(2).permute(0, 2, 1).contiguous() 
         four_point_1 = four_point_1.flatten(2).permute(0, 2, 1).contiguous() 
+        
         try:
-            H = _get_perspective_transform_onnx_safe(four_point_org, four_point_1)
+            # REPLACED: Use custom implementation instead of kornia
+            H = get_perspective_transform_torch(four_point_org, four_point_1)
         except Exception:
             logging.debug("No solution")
             H = torch.eye(3).to(four_point_org.device).repeat(four_point_1.shape[0],1,1)
-        warped_image = tgm.warp_perspective(x, H, (x.shape[2], x.shape[3]))
+        
+        # This one still uses kornia since you said it works
+        warped_image = warp_perspective_torch(x, H, (x.shape[2], x.shape[3]))
     else:
         logging.debug("Output NaN by model error.")
         warped_image = x
+    
     return warped_image
