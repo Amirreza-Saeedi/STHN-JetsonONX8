@@ -2,7 +2,9 @@ import numpy as np
 import os
 import torch
 import argparse
-from local_pipeline.model.js_network_noKornia import STHN
+import sys
+print(sys.path)
+from model.js_network_noKornia import STHN
 from utils import save_overlap_img, save_img, setup_seed, save_overlap_bbox_img
 import datasets_4cor_img as datasets
 import scipy.io as io

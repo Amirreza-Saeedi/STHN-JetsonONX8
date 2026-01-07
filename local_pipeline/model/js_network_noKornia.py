@@ -27,7 +27,7 @@ import numpy as np
 autocast = torch.cuda.amp.autocast
 import sys
 print(sys.path)
-from local_pipeline.model.js_kornia_replacement import (
+from model.js_kornia_replacement import (
     get_perspective_transform_torch, 
     crop_and_resize_torch,
     bbox_generator_torch,
