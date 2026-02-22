@@ -136,8 +136,8 @@ def test(args, wandb_log):
 
             # --- GRID CROP ---
 
-            img1_path = fr"D:/RPL/Tiles/Dehat/satellite/{i // TH + 1}.tif"
-            img2_path = fr"D:/RPL/Tiles/Dehat/thermal/{i // TH + 1}_{i % TH + 1}.tif"
+            img1_path = fr"js_datasets/Dehat/satellite/{i // TH + 1}.tif"
+            img2_path = fr"js_datasets/Dehat/thermal/{i // TH + 1}_{i % TH + 1}.tif"
 
             # خواندن تصاویر
             img1 = F.to_tensor(Image.open(img1_path).convert("RGB")).unsqueeze(0)
