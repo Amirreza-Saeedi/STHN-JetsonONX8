@@ -111,6 +111,11 @@ def test(args, wandb_log):
     # four_point_1 = four_point_1.flatten(2).permute(0, 2, 1).contiguous()
     # four_point_1_mul6 = four_point_1 * 6
     # print(f"four_point_1:{four_point_1}\nfour_point_1_mul6:{four_point_1_mul6}")
+
+    model = torch.quantization.quantize_dynamic(
+        model, {torch.nn.Linear}, dtype=torch.qint8
+    )
+
     folder_name = "maps_results/farm"
     all_corners = []
     times = []
@@ -190,7 +195,7 @@ def test(args, wandb_log):
     # ذخیره در فایل Excel
     columns = ["image_index", "x1", "y1", "x2", "y2", "x3", "y3", "x4", "y4", "sat", "th"]
     df = pd.DataFrame(all_corners, columns=columns)
-    df.to_excel(f"js_excels/predicted-dehat-noSVD.xlsx", index=False)
+    df.to_excel(f"js_excels/predicted-dehat-int8.xlsx", index=False)
     print("📁 Saved all corner points to four_point_1_mul6.xlsx")
 
 
