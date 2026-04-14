@@ -23,21 +23,18 @@ import time
 import logging
 import datasets_4cor_img as datasets
 import numpy as np
+# Keep only the warp_perspective from kornia if it works for you
+import kornia.geometry.transform as tgm  # Only for warp_perspective
 
 autocast = torch.cuda.amp.autocast
-import sys
-print(sys.path)
+# import sys
+# print(sys.path)
 from model.js_kornia_replacement import (
     get_perspective_transform_torch, 
     crop_and_resize_torch,
     bbox_generator_torch,
     warp_perspective_torch
 )
-
-# Keep only the warp_perspective from kornia if it works for you
-import kornia.geometry.transform as tgm  # Only for warp_perspective
-
-# ... rest of your imports ...
 
 # In your IHN class, replace the get_perspective_transform calls:
 
@@ -56,6 +53,12 @@ class IHN(nn.Module):
 
         self.imagenet_mean = None
         self.imagenet_std = None
+
+        # Log Attributes
+        self.ihn_str = 'IHN1' if self.first_stage else 'IHN2'
+        self.round = 0
+        self.times = [0, 0, 0]
+
     def get_flow_now_4(self, four_point):
         four_point = four_point / 4
         four_point_org = torch.zeros((2, 2, 2)).to(four_point.device)
@@ -158,7 +161,13 @@ class IHN(nn.Module):
             self.imagenet_std = torch.Tensor([0.229, 0.224, 0.225]).unsqueeze(0).unsqueeze(2).unsqueeze(3).to(image1.device)
         image1 = (image1.contiguous() - self.imagenet_mean) / self.imagenet_std
         image2 = (image2.contiguous() - self.imagenet_mean) / self.imagenet_std
-        # time1 = time.time()
+        
+        # rrr Log Params
+        self.round += 1
+        times_prev = self.times.copy()
+
+        # Extractor
+        time1 = time.time()
         with autocast(enabled=self.args.mixed_precision):
             # fmap1_64, fmap1_128 = self.fnet1(image1)
             # fmap2_64, _ = self.fnet1(image2)
@@ -169,21 +178,27 @@ class IHN(nn.Module):
                 fmap_64 = self.fnet1(torch.cat([image1, image2], dim=0))
                 fmap1_64 = fmap_64[:image1.shape[0]]
                 fmap2_64 = fmap_64[image1.shape[0]:]
-        # time2 = time.time()
+        time2 = time.time()
+        self.times[0] += time2 - time1
         # print("Time for fnet1: " + str(time2 - time1) + " seconds") # 0.004 + # 0.004
 
+        # Corr
         fmap1 = fmap1_64.float()
         fmap2 = fmap2_64.float()
-
-        print(fmap1.shape, fmap2.shape)
+        time1 = time.time()
         corr_fn = CorrBlock(fmap1, fmap2, num_levels=corr_level, radius=corr_radius)
+        time2 = time.time()
+        self.times[1] += time2 - time1
+        
+        # Update
         coords0, coords1 = self.initialize_flow_4(image1)
         # print(coords0.shape, coords1.shape)
         sz = fmap1_64.shape
         self.sz = sz
         four_point_disp = torch.zeros((sz[0], 2, 2, 2)).to(fmap1.device)
         four_point_predictions = []
-        # time1 = time.time()
+
+        time1 = time.time()
         for itr in range(iters_lev0):
             corr = corr_fn(coords1)
             flow = coords1 - coords0
@@ -205,8 +220,37 @@ class IHN(nn.Module):
                 four_point_disp = last_four_point_disp
                 coords1 = self.get_flow_now_4(four_point_disp) # Possible error: Unsolvable H
                 four_point_predictions.append(four_point_disp)
-        # time2 = time.time()
+        time2 = time.time()
+        self.times[2] += time2 - time1
         # print("Time for iterative: " + str(time2 - time1) + " seconds") # 0.12
+        
+        # rrr Parameters Check
+        # print('ppp', self.ihn_str, 'two_stages', self.args.two_stages)
+        # print('ppp', self.ihn_str, 'corr_level', corr_level)
+        # print('ppp', self.ihn_str, 'corr_radius', corr_radius)
+        # print('ppp', self.ihn_str, 'lev0', self.args.lev0)
+        # print('ppp', self.ihn_str, 'resize_width', self.args.resize_width)
+        # print('ppp', self.ihn_str, 'sz', self.args.resize_width // 4)
+        # print('ppp', self.ihn_str, 'weight', self.args.weight)
+        # print('ppp', self.ihn_str, 'iters_lev0', iters_lev0)
+        # print('ppp', self.ihn_str, 'vis_all', self.args.vis_all)
+        # print('ppp', self.ihn_str, 'mixed_precision', self.args.mixed_precision)
+        # print('ppp', self.ihn_str, 'fnet_cat', self.args.fnet_cat)
+        # print('ppp', self.ihn_str, 'database_size', self.args.database_size)
+        # print('ppp', self.ihn_str, 'detach', self.args.detach)
+        # print('ppp', self.ihn_str, 'augment_two_stages', self.args.augment_two_stages)
+        # print('ppp', self.ihn_str, 'alpha', self.args.database_size / self.args.resize_width)
+
+
+        # rrr Time Logs
+        t0 = self.times[0] - times_prev[0]
+        t1 = self.times[1] - times_prev[1]
+        t2 = self.times[2] - times_prev[2]
+        t_sum = t0 + t1 + t2
+        print('ttt', self.ihn_str, 'extract', f'{t0:.3f}, {t0 / t_sum:.2f}%')
+        print('ttt', self.ihn_str, 'corr   ', f'{t1:.3f}, {t1 / t_sum:.2f}%')
+        print('ttt', self.ihn_str, 'update ', f'{t2:.3f}, {t2 / t_sum:.2f}%')
+        print('ttt', self.ihn_str, 'sum    ', f'{t_sum:.3f}')
         return four_point_predictions, four_point_disp
 
 arch_list = {"IHN": IHN,

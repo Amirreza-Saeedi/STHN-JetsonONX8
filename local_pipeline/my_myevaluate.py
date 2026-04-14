@@ -112,15 +112,18 @@ def test(args, wandb_log):
     # four_point_1_mul6 = four_point_1 * 6
     # print(f"four_point_1:{four_point_1}\nfour_point_1_mul6:{four_point_1_mul6}")
 
-    model = torch.quantization.quantize_dynamic(
-        model, {torch.nn.Linear}, dtype=torch.qint8
-    )
+    # model = torch.quantization.quantize_dynamic(
+    #     model, {torch.nn.Linear}, dtype=torch.qint8
+    # )
 
     folder_name = "maps_results/farm"
     all_corners = []
     times = []
+    time_round1_ihn1 = 0
+    time_round1_ihn2 = 0
 
     N = 108 # number of samples
+    # N = 40 # number of samples
     T = 31 # tiles in each x dir
     TH = 9
     SAT = 12
@@ -154,10 +157,6 @@ def test(args, wandb_log):
                 model.forward()
                 four_pred = model.four_pred
 
-            # print('!!!four_pred')
-            # print(four_pred)
-
-    
             # آماده‌سازی نقاط مرجع
             four_point_org_single = torch.zeros((1, 2, 2, 2))
             four_point_org_single[:, :, 0, 0] = torch.Tensor([0, 0])
@@ -174,8 +173,6 @@ def test(args, wandb_log):
             # print(center)
             # print(four_point_1_mul6)
             end_time = time.time()
-            elapsed = end_time - start_time
-            times.append(elapsed)
         
             # استخراج نقاط پیش‌بینی‌شده (4 گوشه)
             points = four_point_1_mul6.squeeze(0).tolist()  # 4 × 2 لیست
@@ -183,19 +180,51 @@ def test(args, wandb_log):
     
             all_corners.append([i] + flat_points + [img1_path, img2_path])  # اضافه کردن شماره عکس + نقاط
     
-            print(f"✅ Done for image {i + 1}")
-    
+            # Time Logs
+            elapsed = end_time - start_time
+            times.append(elapsed)
+            print(f"✅ Done for image {i + 1}, {elapsed:.3}")
+            if i == 0:
+                time_round1_ihn1 = model.netG.times.copy()
+                time_round1_ihn2 = model.netG_fine.times.copy()
+
+
         except Exception as e:
             print(f"❌ Error in image {i}: {e}")
             
     if times:
-        avg_time = sum(times) / len(times)
-        print(f"\n📊 Average processing time per image: {avg_time:.4f} sec")
+        rounds = len(times) - 1
+        print(f'\nNOTICE: First data takes much more time, so it is discarded in the following report. Log is calculated for "{rounds}" images instead of "{len(times)}".')
+        avg_time = sum(times[1:]) / rounds
+        model.netG.times[0] -= time_round1_ihn1[0]
+        model.netG.times[1] -= time_round1_ihn1[1]
+        model.netG.times[2] -= time_round1_ihn1[2]
+        model.netG_fine.times[0] -= time_round1_ihn2[0]
+        model.netG_fine.times[1] -= time_round1_ihn2[1]
+        model.netG_fine.times[2] -= time_round1_ihn2[2]
+        
+        print(f"📊 Average per image: {avg_time:.3f} sec, {1 / avg_time:.2f} fps")
+        t0 = model.netG.times[0] / rounds
+        t1 = model.netG.times[1] / rounds
+        t2 = model.netG.times[2] / rounds
+        t_sum = t0 + t1 + t2
+        print('ttt avg extract', model.netG.ihn_str, f'{t0:.3f}, {t0 / t_sum:.2f}%')
+        print('ttt avg corr   ', model.netG.ihn_str, f'{t1:.3f}, {t1 / t_sum:.2f}%')
+        print('ttt avg update ', model.netG.ihn_str, f'{t2:.3f}, {t2 / t_sum:.2f}%')
+        print('ttt avg sum    ', model.netG.ihn_str, f'{t_sum:.3f}')
+        t0 = model.netG_fine.times[0] / rounds
+        t1 = model.netG_fine.times[1] / rounds
+        t2 = model.netG_fine.times[2] / rounds
+        t_sum = t0 + t1 + t2
+        print('ttt avg extract', model.netG_fine.ihn_str, f'{t0:.3f}, {t0 / t_sum:.2f}%')
+        print('ttt avg corr   ', model.netG_fine.ihn_str, f'{t1:.3f}, {t1 / t_sum:.2f}%')
+        print('ttt avg update ', model.netG_fine.ihn_str, f'{t2:.3f}, {t2 / t_sum:.2f}%')
+        print('ttt avg sum    ', model.netG_fine.ihn_str, f'{t_sum:.3f}')
 
     # ذخیره در فایل Excel
     columns = ["image_index", "x1", "y1", "x2", "y2", "x3", "y3", "x4", "y4", "sat", "th"]
     df = pd.DataFrame(all_corners, columns=columns)
-    df.to_excel(f"js_excels/predicted-dehat-int8.xlsx", index=False)
+    # df.to_excel(f"js_excels/predicted-dehat-int8.xlsx", index=False)
     print("📁 Saved all corner points to four_point_1_mul6.xlsx")
 
 

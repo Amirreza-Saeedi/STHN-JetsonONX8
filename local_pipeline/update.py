@@ -308,7 +308,7 @@ class GMA(nn.Module):
                 elif args.corr_level == 4:
                     init_dim = 326
                 elif args.corr_level == 6:
-                    init_dim = 488
+                    init_dim = 488  
                 else:
                     raise NotImplementedError()
                 self.cnn = CNN_64(128, init_dim=init_dim)
