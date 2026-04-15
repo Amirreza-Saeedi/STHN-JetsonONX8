@@ -28,6 +28,7 @@ import commons
 import logging
 import wandb
 from PIL import Image 
+import js_utils
 base_transform = transforms.Compose(
             [
                 transforms.Resize([256,256]),
@@ -76,13 +77,14 @@ def test(args, wandb_log):
                     if key.startswith('module'):
                         del model_med['netG'][key]
                 model.netG_fine.load_state_dict(model_med['netG'], strict=False)
-        
+        # js_utils.print_gpu_mem('Before Eval')
         model.setup() 
         model.netG.eval()
         if args.use_ue:
             model.netD.eval()
         if args.two_stages:
             model.netG_fine.eval()
+        # js_utils.print_gpu_mem('After Eval')
     # else:
     #     model = None
     #  if args.test:
@@ -115,6 +117,14 @@ def test(args, wandb_log):
     # model = torch.quantization.quantize_dynamic(
     #     model, {torch.nn.Linear}, dtype=torch.qint8
     # )
+
+    js_utils.get_module_stats(model.netG, 'IHN1')
+    js_utils.get_module_stats(model.netG.fnet1, 'extractor1')
+    js_utils.get_module_stats(model.netG.update_block_4, 'update1')
+    js_utils.get_module_stats(model.netG_fine, 'IHN2')
+    js_utils.get_module_stats(model.netG_fine.fnet1, 'extractor2')
+    js_utils.get_module_stats(model.netG_fine.update_block_4, 'update2')
+    print(10 * '=')
 
     folder_name = "maps_results/farm"
     all_corners = []
@@ -247,4 +257,6 @@ if __name__ == '__main__':
     wandb_log = True
     # if wandb_log:
     #     wandb.init(project="STHN-eval", entity="xjh19971", config=vars(args))
+    torch.cuda.empty_cache()
+    torch.cuda.reset_peak_memory_stats()
     test(args, wandb_log)

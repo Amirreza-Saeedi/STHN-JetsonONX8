@@ -25,6 +25,7 @@ import datasets_4cor_img as datasets
 import numpy as np
 # Keep only the warp_perspective from kornia if it works for you
 import kornia.geometry.transform as tgm  # Only for warp_perspective
+import js_utils
 
 autocast = torch.cuda.amp.autocast
 # import sys
@@ -167,6 +168,7 @@ class IHN(nn.Module):
         times_prev = self.times.copy()
 
         # Extractor
+        # js_utils.print_gpu_mem('Before' + self.ihn_str + ' Extract')
         time1 = time.time()
         with autocast(enabled=self.args.mixed_precision):
             # fmap1_64, fmap1_128 = self.fnet1(image1)
@@ -180,17 +182,21 @@ class IHN(nn.Module):
                 fmap2_64 = fmap_64[image1.shape[0]:]
         time2 = time.time()
         self.times[0] += time2 - time1
+        # js_utils.print_gpu_mem('After' + self.ihn_str + ' Extract')
         # print("Time for fnet1: " + str(time2 - time1) + " seconds") # 0.004 + # 0.004
 
         # Corr
+        # js_utils.print_gpu_mem('Before' + self.ihn_str + ' Corr')
         fmap1 = fmap1_64.float()
         fmap2 = fmap2_64.float()
         time1 = time.time()
         corr_fn = CorrBlock(fmap1, fmap2, num_levels=corr_level, radius=corr_radius)
         time2 = time.time()
         self.times[1] += time2 - time1
+        # js_utils.print_gpu_mem('After' + self.ihn_str + ' Corr')
         
         # Update
+        # js_utils.print_gpu_mem('Before' + self.ihn_str + ' Update')
         coords0, coords1 = self.initialize_flow_4(image1)
         # print(coords0.shape, coords1.shape)
         sz = fmap1_64.shape
@@ -222,6 +228,7 @@ class IHN(nn.Module):
                 four_point_predictions.append(four_point_disp)
         time2 = time.time()
         self.times[2] += time2 - time1
+        # js_utils.print_gpu_mem('After' + self.ihn_str + ' Update')
         # print("Time for iterative: " + str(time2 - time1) + " seconds") # 0.12
         
         # rrr Parameters Check
@@ -241,16 +248,16 @@ class IHN(nn.Module):
         # print('ppp', self.ihn_str, 'augment_two_stages', self.args.augment_two_stages)
         # print('ppp', self.ihn_str, 'alpha', self.args.database_size / self.args.resize_width)
 
-
         # rrr Time Logs
-        t0 = self.times[0] - times_prev[0]
-        t1 = self.times[1] - times_prev[1]
-        t2 = self.times[2] - times_prev[2]
-        t_sum = t0 + t1 + t2
-        print('ttt', self.ihn_str, 'extract', f'{t0:.3f}, {t0 / t_sum:.2f}%')
-        print('ttt', self.ihn_str, 'corr   ', f'{t1:.3f}, {t1 / t_sum:.2f}%')
-        print('ttt', self.ihn_str, 'update ', f'{t2:.3f}, {t2 / t_sum:.2f}%')
-        print('ttt', self.ihn_str, 'sum    ', f'{t_sum:.3f}')
+        # t0 = self.times[0] - times_prev[0]
+        # t1 = self.times[1] - times_prev[1]
+        # t2 = self.times[2] - times_prev[2]
+        # t_sum = t0 + t1 + t2
+        # print('ttt', self.ihn_str, 'extract', f'{t0:.3f}, {t0 / t_sum:.2f}%')
+        # print('ttt', self.ihn_str, 'corr   ', f'{t1:.3f}, {t1 / t_sum:.2f}%')
+        # print('ttt', self.ihn_str, 'update ', f'{t2:.3f}, {t2 / t_sum:.2f}%')
+        # print('ttt', self.ihn_str, 'sum    ', f'{t_sum:.3f}')
+        
         return four_point_predictions, four_point_disp
 
 arch_list = {"IHN": IHN,
@@ -325,11 +332,15 @@ class STHN():
     def forward(self, for_training=False):
         """Run forward pass; called by both functions <optimize_parameters> and <test>."""
         # time1 = time.time()
+        # js_utils.print_gpu_mem('Before IHN1')
         self.four_preds_list, self.four_pred = self.netG(image1=self.image_1, image2=self.image_2, iters_lev0=self.args.iters_lev0, corr_level=self.args.corr_level)
+        # js_utils.print_gpu_mem('After IHN1')
         if self.args.two_stages:
             self.image_1_crop, delta, self.flow_bbox = self.get_cropped_st_images(self.image_1_ori, self.four_pred, self.args.fine_padding, self.args.detach, self.args.augment_two_stages)
             self.image_2_crop = self.image_2
+            # js_utils.print_gpu_mem('Before IHN2')
             self.four_preds_list_fine, self.four_pred_fine = self.netG_fine(image1=self.image_1_crop, image2=self.image_2_crop, iters_lev0=self.args.iters_lev1)
+            # js_utils.print_gpu_mem('After IHN2')
             self.four_preds_list, self.four_pred = self.combine_coarse_fine(self.four_preds_list, self.four_pred, self.four_preds_list_fine, self.four_pred_fine, delta, self.flow_bbox, for_training)
         if self.args.vis_all:
             self.fake_warped_image_2 = mywarp(self.image_2, self.four_pred, self.four_point_org_single) # Comment for performance evaluation
