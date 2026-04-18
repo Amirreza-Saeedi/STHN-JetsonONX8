@@ -319,7 +319,8 @@ class GMA(nn.Module):
             else:
                 self.cnn = CNN_128(64)
 
-    def forward(self, corr, flow):      
+    def forward(self, corr, flow):  
+        print(corr.shape)    
         if self.args.weight:
             delta_flow, weight = self.cnn_weight(torch.cat((corr, flow), dim=1))
             return delta_flow, weight

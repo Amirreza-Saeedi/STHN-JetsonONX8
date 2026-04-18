@@ -41,27 +41,32 @@ query_transform = transforms.Compose(
             ]
         )
 def test(args, wandb_log):
+    print("--1--")
     if not args.identity:
+        print("--2--")
         model = STHN(args)
         if not args.train_ue_method == "train_only_ue_raw_input":
             model_med = torch.load(args.eval_model, map_location='cuda:0')
+            print("--3--")
             for key in list(model_med['netG'].keys()):
                 model_med['netG'][key.replace('module.','')] = model_med['netG'][key]
             for key in list(model_med['netG'].keys()):
                 if key.startswith('module'):
                     del model_med['netG'][key]
             model.netG.load_state_dict(model_med['netG'], strict=False)
-        if args.use_ue:
-            if args.eval_model_ue is not None:
-                model_med = torch.load(args.eval_model_ue, map_location='cuda:0')
-            for key in list(model_med['netD'].keys()):
-                model_med['netD'][key.replace('module.','')] = model_med['netD'][key]
-            for key in list(model_med['netD'].keys()):
-                if key.startswith('module'):
-                    del model_med['netD'][key]
-            model.netD.load_state_dict(model_med['netD'])
+        # if args.use_ue:
+        #     if args.eval_model_ue is not None:
+        #         model_med = torch.load(args.eval_model_ue, map_location='cuda:0')
+        #     for key in list(model_med['netD'].keys()):
+        #         model_med['netD'][key.replace('module.','')] = model_med['netD'][key]
+        #     for key in list(model_med['netD'].keys()):
+        #         if key.startswith('module'):
+        #             del model_med['netD'][key]
+        #     model.netD.load_state_dict(model_med['netD'])
         if args.two_stages:
+            print("--6--")
             if args.eval_model_fine is None:
+                print("--7--")
                 model_med = torch.load(args.eval_model, map_location='cuda:0')
                 for key in list(model_med['netG_fine'].keys()):
                     model_med['netG_fine'][key.replace('module.','')] = model_med['netG_fine'][key]
@@ -70,6 +75,7 @@ def test(args, wandb_log):
                         del model_med['netG_fine'][key]
                 model.netG_fine.load_state_dict(model_med['netG_fine'])
             else:
+                print("--8--")
                 model_med = torch.load(args.eval_model_fine, map_location='cuda:0')
                 for key in list(model_med['netG'].keys()):
                     model_med['netG'][key.replace('module.','')] = model_med['netG'][key]
@@ -78,6 +84,114 @@ def test(args, wandb_log):
                         del model_med['netG'][key]
                 model.netG_fine.load_state_dict(model_med['netG'], strict=False)
         # js_utils.print_gpu_mem('Before Eval')
+
+        import torch.nn.utils.prune as prune
+        import torch.nn as nn
+        def structured_prune_model(model, amount=0.3):
+            for name, module in model.named_modules():
+                if isinstance(module, nn.Conv2d):
+                    # prune output channels (dim=0)
+                    prune.ln_structured(
+                        module,
+                        name="weight",
+                        amount=amount,
+                        n=2,
+                        dim=0
+                    )
+                    prune.remove(module, "weight")  # make permanent
+            return model
+        
+        def get_alive_channels(weight):
+            # weight: [out_channels, in_channels, k, k]
+            alive = torch.norm(weight.view(weight.size(0), -1), dim=1) > 0
+            return alive
+        
+        def prune_conv_layer(conv, in_mask=None):    
+            W = conv.weight.data
+            out_mask = get_alive_channels(W)
+            if in_mask is not None:        W = W[:, in_mask, :, :]
+            W = W[out_mask, :, :, :]
+            new_conv = nn.Conv2d(        in_channels=W.shape[1],        out_channels=W.shape[0],        kernel_size=conv.kernel_size,        stride=conv.stride,        padding=conv.padding,        bias=(conv.bias is not None)    )
+            new_conv.weight.data = W.clone()
+            if conv.bias is not None:        new_conv.bias.data = conv.bias.data[out_mask].clone()
+            return new_conv, out_mask
+
+        def find_valid_groups(num_channels, max_groups=32):
+            # find largest divisor ≤ max_groups
+            for g in reversed(range(1, max_groups + 1)):
+                if num_channels % g == 0:
+                    return g
+            return 1  # fallback
+
+        def prune_groupnorm(gn, mask):
+            new_channels = int(mask.sum().item())
+
+            new_groups = find_valid_groups(new_channels)
+
+            new_gn = nn.GroupNorm(new_groups, new_channels)
+
+            new_gn.weight.data = gn.weight.data[mask].clone()
+            new_gn.bias.data = gn.bias.data[mask].clone()
+
+            return new_gn
+
+        def surgery_layer(seq, in_mask=None):
+            conv = seq[0]
+            gn = seq[1]
+            relu = seq[2]
+            pool = seq[3]
+
+            new_conv, out_mask = prune_conv_layer(conv, in_mask)
+            new_gn = prune_groupnorm(gn, out_mask)
+
+            new_seq = nn.Sequential(new_conv, new_gn, relu, pool)
+
+            return new_seq, out_mask
+
+        def surgery_cnn64(model):
+            mask = None
+
+            model.layer1, mask = surgery_layer(model.layer1, mask)
+            model.layer2, mask = surgery_layer(model.layer2, mask)
+            model.layer3, mask = surgery_layer(model.layer3, mask)
+            model.layer4, mask = surgery_layer(model.layer4, mask)
+            model.layer5, mask = surgery_layer(model.layer5, mask)
+
+            # final layer (no pooling)
+            conv1 = model.layer10[0]
+            gn = model.layer10[1]
+            relu = model.layer10[2]
+            conv2 = model.layer10[3]
+
+            conv1, mask = prune_conv_layer(conv1, mask)
+            gn = prune_groupnorm(gn, mask)
+
+            conv2, _ = prune_conv_layer(conv2, mask)
+
+            model.layer10 = nn.Sequential(conv1, gn, relu, conv2)
+
+            return model
+
+        # model = CNN_64(128, init_dim=164)
+
+        # # load weights first
+        # model.load_state_dict(...)
+
+        parameters = sum(p.numel() for p in model.netG.update_block_4.cnn.parameters())
+        print(parameters)
+        # prune
+        model.netG.update_block_4.cnn = structured_prune_model(model.netG.update_block_4.cnn, amount=0.6)
+
+        model.netG.update_block_4.cnn = surgery_cnn64(model.netG.update_block_4.cnn)
+
+        # prune
+        model.netG_fine.update_block_4.cnn = structured_prune_model(model.netG_fine.update_block_4.cnn, amount=0.3)
+
+        model.netG_fine.update_block_4.cnn = surgery_cnn64(model.netG_fine.update_block_4.cnn)
+
+        parameters = sum(p.numel() for p in model.netG.update_block_4.cnn.parameters())
+        print(parameters)
+
         model.setup() 
         model.netG.eval()
         if args.use_ue:
@@ -118,13 +232,15 @@ def test(args, wandb_log):
     #     model, {torch.nn.Linear}, dtype=torch.qint8
     # )
 
-    js_utils.get_module_stats(model.netG, 'IHN1')
-    js_utils.get_module_stats(model.netG.fnet1, 'extractor1')
-    js_utils.get_module_stats(model.netG.update_block_4, 'update1')
-    js_utils.get_module_stats(model.netG_fine, 'IHN2')
-    js_utils.get_module_stats(model.netG_fine.fnet1, 'extractor2')
-    js_utils.get_module_stats(model.netG_fine.update_block_4, 'update2')
-    print(10 * '=')
+    # js_utils.get_module_stats(model.netG, 'IHN1')
+    # js_utils.get_module_stats(model.netG.fnet1, 'extractor1')
+    # js_utils.get_module_stats(model.netG.update_block_4, 'update1')
+    # js_utils.get_module_stats(model.netG_fine, 'IHN2')
+    # js_utils.get_module_stats(model.netG_fine.fnet1, 'extractor2')
+    # js_utils.get_module_stats(model.netG_fine.update_block_4, 'update2')
+    # print(10 * '=')
+
+
 
     folder_name = "maps_results/farm"
     all_corners = []
