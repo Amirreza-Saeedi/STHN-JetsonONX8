@@ -19,8 +19,8 @@ import datasets_4cor_img as datasets
 import numpy as np
 import kornia.geometry.transform as tgm  # Only for warp_perspective
 
-autocast = torch.cuda.amp.autocast
-# autocast = torch.amp.autocast
+# autocast = torch.cuda.amp.autocast
+autocast = torch.amp.autocast
 
 import sys
 from model.js_kornia_replacement import (
@@ -100,13 +100,13 @@ class IHN(nn.Module):
         image2 = (image2.contiguous() - self.imagenet_mean) / self.imagenet_std
 
         # Extract
-        # with autocast(enabled=self.args.mixed_precision):  # TODO
-        #     fmap1_64 = self.fnet1(image1)
-        #     fmap2_64 = self.fnet1(image2)
-        # fmap1 = fmap1_64.float()
-        # fmap2 = fmap2_64.float()
-        fmap1 = self.fnet1(image1)
-        fmap2 = self.fnet1(image2)
+        with autocast(device_type='cuda', enabled=self.args.mixed_precision):  # TODO
+            fmap1_64 = self.fnet1(image1)
+            fmap2_64 = self.fnet1(image2)
+        fmap1 = fmap1_64.float()
+        fmap2 = fmap2_64.float()
+        # fmap1 = self.fnet1(image1)
+        # fmap2 = self.fnet1(image2)
 
         # Corr
         corr_fn = CorrBlock(fmap1, fmap2, num_levels=corr_level, radius=corr_radius)
@@ -120,8 +120,9 @@ class IHN(nn.Module):
         for itr in range(iters_lev0):
             corr = corr_fn(coords1)
             flow = coords1 - coords0
-            # with autocast(enabled=self.args.mixed_precision):  # TODO
-            delta_four_point = self.update_block_4(corr, flow)
+            with autocast(device_type='cuda', enabled=self.args.mixed_precision
+                          ):  # TODO
+                delta_four_point = self.update_block_4(corr, flow)
                     
             last_four_point_disp = four_point_disp
             four_point_disp =  four_point_disp + delta_four_point
@@ -211,7 +212,6 @@ class STHN(nn.Module):
             image1, size=self.args.resize_width, 
             mode='bilinear', align_corners=True, antialias=True
         )
-        
         # Coarse prediction
         four_preds_list, four_pred = self.netG(
             image1=image1_resized, 

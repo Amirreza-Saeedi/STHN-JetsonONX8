@@ -42,6 +42,7 @@ query_transform = transforms.Compose(
 def load_sthn(args):
     if not args.identity:
         model = STHN(args)
+        # model = torch.compile(model, mode='reduce-overhead')
         if not args.train_ue_method == "train_only_ue_raw_input":
             model_med = torch.load(args.eval_model, map_location=args.device)
             for key in list(model_med['netG'].keys()):
@@ -50,8 +51,6 @@ def load_sthn(args):
                 if key.startswith('module'):
                     del model_med['netG'][key]
             model.netG.load_state_dict(model_med['netG'], strict=False)
-
-        print('args.eval_model_ue', args.eval_model_ue)
         
         if args.eval_model_fine is None:
             model_med = torch.load(args.eval_model, map_location=args.device)
@@ -143,6 +142,8 @@ def export_via_jit(model, args, onnx_path="sthn.onnx"):
 
 
 def test(args, wandb_log):
+    torch.backends.cudnn.benchmark = True
+    torch.set_float32_matmul_precision('high')
 
     # model = load_sthn(args).cpu()
     model = load_sthn(args)
@@ -158,56 +159,57 @@ def test(args, wandb_log):
     times = []
 
     N = 108 # number of samples
-    N = 10 # number of samples
+    # N = 50 # number of samples
     T = 31 # tiles in each x dir
     TH = 9
     SAT = 12
-    for i in range(N):
-        try:
-            # --- GRID CROP ---
-            img1_path = fr"D:/RPL/Tiles/Dehat/satellite/{i // TH + 1}.tif"
-            img2_path = fr"D:/RPL/Tiles/Dehat/thermal/{i // TH + 1}_{i % TH + 1}.tif"
+    with torch.inference_mode():
+        for i in range(N):
+            try:
+                # --- GRID CROP ---
+                img1_path = fr"js_datasets/Dehat/satellite/{i // TH + 1}.tif"
+                img2_path = fr"js_datasets/Dehat/thermal/{i // TH + 1}_{i % TH + 1}.tif"
 
-            # خواندن تصاویر
-            img1 = F.to_tensor(Image.open(img1_path).convert("RGB")).unsqueeze(0)
-            img2 = (base_transform(query_transform(Image.open(img2_path)))).unsqueeze(0)
-            start_time = time.time()
-            # اعمال مدل
-            with torch.no_grad():
+                # خواندن تصاویر
+                img1 = F.to_tensor(Image.open(img1_path).convert("RGB")).unsqueeze(0)
+                img2 = (base_transform(query_transform(Image.open(img2_path)))).unsqueeze(0)
+                start_time = time.time()
+                # اعمال مدل
+                # with torch.no_grad():
                 model.set_input(img1, img2)
                 model.forward(img1, img2)
                 # model.forward()
                 four_pred = model.four_pred
-    
-            # آماده‌سازی نقاط مرجع
-            four_point_org_single = torch.zeros((1, 2, 2, 2))
-            four_point_org_single[:, :, 0, 0] = torch.Tensor([0, 0])
-            four_point_org_single[:, :, 0, 1] = torch.Tensor([args.resize_width - 1, 0])
-            four_point_org_single[:, :, 1, 0] = torch.Tensor([0, args.resize_width - 1])
-            four_point_org_single[:, :, 1, 1] = torch.Tensor([args.resize_width - 1, args.resize_width - 1])
-            
-            # پردازش خروجی
-            four_point_1 = four_pred.cpu().detach() + four_point_org_single
-            four_point_1 = four_point_1.flatten(2).permute(0, 2, 1).contiguous()
-            four_point_1_mul6 = four_point_1 * 6
-            center = four_point_1_mul6.mean(dim=1)  # شکل (1,2)
-            center = tuple(center[0].tolist())
-            # print(center)
-            # print(four_point_1_mul6)
-            end_time = time.time()
-            elapsed = end_time - start_time
-            times.append(elapsed)
         
-            # استخراج نقاط پیش‌بینی‌شده (4 گوشه)
-            points = four_point_1_mul6.squeeze(0).tolist()  # 4 × 2 لیست
-            flat_points = [coord for point in points for coord in point]  # تبدیل به لیست 8 تایی
-            print(flat_points)
-            all_corners.append([i] + flat_points + [img1_path, img2_path])  # اضافه کردن شماره عکس + نقاط
-    
-            print(f"✅ Done for image {i + 1}   {elapsed:.3f} sec")
-    
-        except Exception as e:
-            print(f"❌ Error in image {i}: {e}")
+                # آماده‌سازی نقاط مرجع
+                four_point_org_single = torch.zeros((1, 2, 2, 2))
+                four_point_org_single[:, :, 0, 0] = torch.Tensor([0, 0])
+                four_point_org_single[:, :, 0, 1] = torch.Tensor([args.resize_width - 1, 0])
+                four_point_org_single[:, :, 1, 0] = torch.Tensor([0, args.resize_width - 1])
+                four_point_org_single[:, :, 1, 1] = torch.Tensor([args.resize_width - 1, args.resize_width - 1])
+                
+                # پردازش خروجی
+                four_point_1 = four_pred.cpu().detach() + four_point_org_single
+                four_point_1 = four_point_1.flatten(2).permute(0, 2, 1).contiguous()
+                four_point_1_mul6 = four_point_1 * 6
+                center = four_point_1_mul6.mean(dim=1)  # شکل (1,2)
+                center = tuple(center[0].tolist())
+                # print(center)
+                # print(four_point_1_mul6)
+                end_time = time.time()
+                elapsed = end_time - start_time
+                times.append(elapsed)
+            
+                # استخراج نقاط پیش‌بینی‌شده (4 گوشه)
+                points = four_point_1_mul6.squeeze(0).tolist()  # 4 × 2 لیست
+                flat_points = [coord for point in points for coord in point]  # تبدیل به لیست 8 تایی
+                # print(flat_points)
+                all_corners.append([i] + flat_points + [img1_path, img2_path])  # اضافه کردن شماره عکس + نقاط
+        
+                print(f"✅ Done for image {i + 1}   {elapsed:.3f} sec")
+        
+            except Exception as e:
+                print(f"❌ Error in image {i}: {e}")
             
     if times:
         avg_time = sum(times[1:]) / len(times[1:])
@@ -225,7 +227,7 @@ class Args:
         self.resize_width = 256
         self.database_size = 1536
         self.lev0 = True
-        self.mixed_precision = False
+        self.mixed_precision = True
         self.arch = "IHN"
         self.iters_lev0 = 6
         self.iters_lev1 = 6
@@ -248,6 +250,7 @@ class Args:
 
 if __name__ == '__main__':
     # Use command args or in-code args
+    os.system('echo 320 | sudo sync && echo 3 | sudo tee /proc/sys/vm/drop_caches')
     args = Args()
     # args = parser.parse_arguments()
 
