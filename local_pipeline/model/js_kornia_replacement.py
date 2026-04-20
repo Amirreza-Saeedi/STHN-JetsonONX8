@@ -2,61 +2,6 @@ import torch
 import torch.nn.functional as F
 import numpy as np
 
-# def get_perspective_transform_torch(src, dst):
-#     """
-#     Replace kornia.geometry.transform.get_perspective_transform
-#     Calculates perspective transformation matrix from 4 point correspondences.
-    
-#     Args:
-#         src: [B, 4, 2] source points
-#         dst: [B, 4, 2] destination points
-    
-#     Returns:
-#         H: [B, 3, 3] perspective transformation matrices
-#     """
-#     batch_size = src.shape[0]
-#     device = src.device
-#     dtype = src.dtype
-    
-#     # Build the system of equations for each batch
-#     # For perspective transform: dst = H @ src (in homogeneous coordinates)
-#     # We need to solve for H using 4 point correspondences
-    
-#     H_list = []
-#     # for b in range(batch_size): # batch_size=1 
-#     src_b = src[0]  # [4, 2]
-#     dst_b = dst[0]  # [4, 2]
-    
-#     # Build matrix A for the equation Ah = 0
-#     A = torch.zeros((8, 9), device=device, dtype=dtype)
-    
-#     for i in range(4):
-#         x, y = src_b[i]
-#         u, v = dst_b[i]
-        
-#         A[2*i] = torch.tensor([x, y, 1, 0, 0, 0, -u*x, -u*y, -u], device=device, dtype=dtype)
-#         A[2*i + 1] = torch.tensor([0, 0, 0, x, y, 1, -v*x, -v*y, -v], device=device, dtype=dtype)
-    
-#     # Solve using SVD
-#     # try: # no try-catch for static graph
-#     U, S, Vh = torch.linalg.svd()  # XXX linlag.inverse breaks on Jetson
-#     h = Vh[-1].to(device)
-#     # U, S, Vh = torch.linalg.svd(A)
-#     # h = Vh[-1, :]  # Last row of V (or last column of V^H)
-#     H_b = h.reshape(3, 3)
-    
-#     # Normalize so that H[2,2] = 1
-#     H_b = H_b / H_b[2, 2]
-
-#     # except:
-#     #     # If SVD fails, return identity matrix
-#     #     H_b = torch.eye(3, device=device, dtype=dtype)
-    
-#     H_list.append(H_b)
-    
-#     H = torch.stack(H_list, dim=0)
-#     return H
-
 def get_perspective_transform_torch(src, dst):
     """
     Replace kornia.geometry.transform.get_perspective_transform
@@ -73,44 +18,41 @@ def get_perspective_transform_torch(src, dst):
     device = src.device
     dtype = src.dtype
     
-    # Handle batch dimension properly
+    # Build the system of equations for each batch
+    # For perspective transform: dst = H @ src (in homogeneous coordinates)
+    # We need to solve for H using 4 point correspondences
+    
     H_list = []
-    
-    # for b in range(batch_size):
-    src_b = src[0]  # [4, 2]
-    dst_b = dst[0]  # [4, 2]
-    
-    # Build matrix A for the equation Ah = 0
-    A = torch.zeros((8, 9), device=device, dtype=dtype)
-    
-    for i in range(4):
-        x = src_b[i, 0]
-        y = src_b[i, 1]
-        u = dst_b[i, 0]
-        v = dst_b[i, 1]
+    for b in range(batch_size):
+        src_b = src[b]  # [4, 2]
+        dst_b = dst[b]  # [4, 2]
         
-        # FIXED: Use stack instead of torch.tensor for traceability
-        A[2*i] = torch.stack([
-            x, y, torch.ones_like(x),
-            torch.zeros_like(x), torch.zeros_like(x), torch.zeros_like(x),
-            -u*x, -u*y, -u
-        ])
+        # Build matrix A for the equation Ah = 0
+        A = torch.zeros((8, 9), device=device, dtype=dtype)
         
-        A[2*i + 1] = torch.stack([
-            torch.zeros_like(x), torch.zeros_like(x), torch.zeros_like(x),
-            x, y, torch.ones_like(x),
-            -v*x, -v*y, -v
-        ])
-    
-    # FIXED: Don't move to CPU - keep on same device
-    # Solve using SVD (no .cpu() call)
-    U, S, Vh = torch.linalg.svd(A)
-    h = Vh[-1, :]  # Last row of Vh is the solution
-    H_b = h.reshape(3, 3)
-    
-    # Normalize so that H[2,2] = 1
-    H_b = H_b / H_b[2, 2]
-    H_list.append(H_b)
+        for i in range(4):
+            x, y = src_b[i]
+            u, v = dst_b[i]
+            
+            A[2*i] = torch.tensor([x, y, 1, 0, 0, 0, -u*x, -u*y, -u], device=device, dtype=dtype)
+            A[2*i + 1] = torch.tensor([0, 0, 0, x, y, 1, -v*x, -v*y, -v], device=device, dtype=dtype)
+        
+        # Solve using SVD
+        try:
+            U, S, Vh = torch.linalg.svd(A.cpu())
+            h = Vh[-1].to(device)
+            # U, S, Vh = torch.linalg.svd(A)
+            # h = Vh[-1, :]  # Last row of V (or last column of V^H)
+            H_b = h.reshape(3, 3)
+            
+            # Normalize so that H[2,2] = 1
+            H_b = H_b / H_b[2, 2]
+
+        except:
+            # If SVD fails, return identity matrix
+            H_b = torch.eye(3, device=device, dtype=dtype)
+        
+        H_list.append(H_b)
     
     H = torch.stack(H_list, dim=0)
     return H

@@ -177,20 +177,20 @@ def test(args, wandb_log):
         # # load weights first
         # model.load_state_dict(...)
 
-        parameters = sum(p.numel() for p in model.netG.update_block_4.cnn.parameters())
-        print(parameters)
-        # prune
-        model.netG.update_block_4.cnn = structured_prune_model(model.netG.update_block_4.cnn, amount=0.6)
+        # parameters = sum(p.numel() for p in model.netG.update_block_4.cnn.parameters())
+        # print(parameters)
+        # # prune
+        # model.netG.update_block_4.cnn = structured_prune_model(model.netG.update_block_4.cnn, amount=0.6)
 
-        model.netG.update_block_4.cnn = surgery_cnn64(model.netG.update_block_4.cnn)
+        # model.netG.update_block_4.cnn = surgery_cnn64(model.netG.update_block_4.cnn)
 
-        # prune
-        model.netG_fine.update_block_4.cnn = structured_prune_model(model.netG_fine.update_block_4.cnn, amount=0.3)
+        # # prune
+        # model.netG_fine.update_block_4.cnn = structured_prune_model(model.netG_fine.update_block_4.cnn, amount=0.3)
 
-        model.netG_fine.update_block_4.cnn = surgery_cnn64(model.netG_fine.update_block_4.cnn)
+        # model.netG_fine.update_block_4.cnn = surgery_cnn64(model.netG_fine.update_block_4.cnn)
 
-        parameters = sum(p.numel() for p in model.netG.update_block_4.cnn.parameters())
-        print(parameters)
+        # parameters = sum(p.numel() for p in model.netG.update_block_4.cnn.parameters())
+        # print(parameters)
 
         model.setup() 
         model.netG.eval()
@@ -249,7 +249,7 @@ def test(args, wandb_log):
     time_round1_ihn2 = 0
 
     N = 108 # number of samples
-    # N = 40 # number of samples
+    N = 10 # number of samples
     T = 31 # tiles in each x dir
     TH = 9
     SAT = 12
@@ -350,7 +350,7 @@ def test(args, wandb_log):
     # ذخیره در فایل Excel
     columns = ["image_index", "x1", "y1", "x2", "y2", "x3", "y3", "x4", "y4", "sat", "th"]
     df = pd.DataFrame(all_corners, columns=columns)
-    # df.to_excel(f"js_excels/predicted-dehat-int8.xlsx", index=False)
+    df.to_excel(f"js_excels/dehat.xlsx", index=False)
     print("📁 Saved all corner points to four_point_1_mul6.xlsx")
 
 
