@@ -144,8 +144,8 @@ def export_via_jit(model, args, onnx_path="sthn.onnx"):
 
 def test(args, wandb_log):
 
-    model = load_sthn(args).cpu()
-    # model = load_sthn(args)
+    # model = load_sthn(args).cpu()
+    model = load_sthn(args)
 
     print(10 * '=')
     print()
@@ -176,6 +176,7 @@ def test(args, wandb_log):
             with torch.no_grad():
                 model.set_input(img1, img2)
                 model.forward(img1, img2)
+                # model.forward()
                 four_pred = model.four_pred
     
             # آماده‌سازی نقاط مرجع
@@ -234,8 +235,8 @@ class Args:
         self.augment_two_stages = 0
         self.augment_type = 'center'
         self.identity = False
+        # self.device = torch.device('cpu')
         self.device = torch.device('cuda:0')
-        self.device = torch.device('cpu')
         self.two_stages = True
         self.use_ue = False
         self.train_ue_method = 'train_end_to_end'

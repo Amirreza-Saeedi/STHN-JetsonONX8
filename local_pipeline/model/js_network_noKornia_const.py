@@ -139,18 +139,31 @@ class STHN(nn.Module):
         self.args = args
         self.device = args.device
         # self.four_point_org_single = torch.zeros((1, 2, 2, 2)).to(self.device)
-        self.register_buffer('four_point_org_single', torch.zeros((1, 2, 2, 2)))
-        self.four_point_org_single[:, :, 0, 0] = torch.Tensor([0, 0]).to(self.device)
-        self.four_point_org_single[:, :, 0, 1] = torch.Tensor([self.args.resize_width - 1, 0]).to(self.device)
-        self.four_point_org_single[:, :, 1, 0] = torch.Tensor([0, self.args.resize_width - 1]).to(self.device)
-        self.four_point_org_single[:, :, 1, 1] = torch.Tensor([self.args.resize_width - 1, self.args.resize_width - 1]).to(self.device)
+        # self.four_point_org_single[:, :, 0, 0] = torch.Tensor([0, 0]).to(self.device)
+        # self.four_point_org_single[:, :, 0, 1] = torch.Tensor([self.args.resize_width - 1, 0]).to(self.device)
+        # self.four_point_org_single[:, :, 1, 0] = torch.Tensor([0, self.args.resize_width - 1]).to(self.device)
+        # self.four_point_org_single[:, :, 1, 1] = torch.Tensor([self.args.resize_width - 1, self.args.resize_width - 1]).to(self.device)
         # self.four_point_org_large_single = torch.zeros((1, 2, 2, 2)).to(self.device)
-        self.register_buffer('four_point_org_large_single', torch.zeros((1, 2, 2, 2)))
-        self.four_point_org_large_single[:, :, 0, 0] = torch.Tensor([0, 0]).to(self.device)
-        self.four_point_org_large_single[:, :, 0, 1] = torch.Tensor([self.args.database_size - 1, 0]).to(self.device)
-        self.four_point_org_large_single[:, :, 1, 0] = torch.Tensor([0, self.args.database_size - 1]).to(self.device)
-        self.four_point_org_large_single[:, :, 1, 1] = torch.Tensor([self.args.database_size - 1, self.args.database_size - 1]).to(self.device) # Only to calculate flow so no -1
+        # self.four_point_org_large_single[:, :, 0, 0] = torch.Tensor([0, 0]).to(self.device)
+        # self.four_point_org_large_single[:, :, 0, 1] = torch.Tensor([self.args.database_size - 1, 0]).to(self.device)
+        # self.four_point_org_large_single[:, :, 1, 0] = torch.Tensor([0, self.args.database_size - 1]).to(self.device)
+        # self.four_point_org_large_single[:, :, 1, 1] = torch.Tensor([self.args.database_size - 1, self.args.database_size - 1]).to(self.device) # Only to calculate flow so no -1
         
+        # FIXED: Create buffers directly on the correct device
+        four_point_org_single = torch.zeros((1, 2, 2, 2), device=self.device)
+        four_point_org_single[:, :, 0, 0] = torch.tensor([0, 0], device=self.device)
+        four_point_org_single[:, :, 0, 1] = torch.tensor([self.args.resize_width - 1, 0], device=self.device)
+        four_point_org_single[:, :, 1, 0] = torch.tensor([0, self.args.resize_width - 1], device=self.device)
+        four_point_org_single[:, :, 1, 1] = torch.tensor([self.args.resize_width - 1, self.args.resize_width - 1], device=self.device)
+        self.register_buffer('four_point_org_single', four_point_org_single)
+        
+        four_point_org_large_single = torch.zeros((1, 2, 2, 2), device=self.device)
+        four_point_org_large_single[:, :, 0, 0] = torch.tensor([0, 0], device=self.device)
+        four_point_org_large_single[:, :, 0, 1] = torch.tensor([self.args.database_size - 1, 0], device=self.device)
+        four_point_org_large_single[:, :, 1, 0] = torch.tensor([0, self.args.database_size - 1], device=self.device)
+        four_point_org_large_single[:, :, 1, 1] = torch.tensor([self.args.database_size - 1, self.args.database_size - 1], device=self.device)
+        self.register_buffer('four_point_org_large_single', four_point_org_large_single)
+
         # Sub Modules
         self.netG = IHN(args, True)
         self.shift_flow_bbox = None
@@ -188,6 +201,11 @@ class STHN(nn.Module):
         # self.four_preds_list_fine, self.four_pred_fine = self.netG_fine(image1=self.image_1_crop, image2=self.image_2_crop, iters_lev0=self.args.iters_lev1)
         # self.four_preds_list, self.four_pred = self.combine_coarse_fine(self.four_preds_list, self.four_pred, self.four_preds_list_fine, self.four_pred_fine, delta, self.flow_bbox)
         
+        # FIXED: Move input tensors to the model's device
+        device = next(self.parameters()).device
+        image1 = image1.to(device)
+        image2 = image2.to(device)
+
         # Interpolate input
         image1_resized = F.interpolate(
             image1, size=self.args.resize_width, 
