@@ -38,11 +38,12 @@ query_transform = transforms.Compose(
                 transforms.ToTensor()
             ]
         )
-def test(args, wandb_log):
+
+def load_sthn(args):
     if not args.identity:
         model = STHN(args)
         if not args.train_ue_method == "train_only_ue_raw_input":
-            model_med = torch.load(args.eval_model, map_location='cuda:0')
+            model_med = torch.load(args.eval_model, map_location=args.device)
             for key in list(model_med['netG'].keys()):
                 model_med['netG'][key.replace('module.','')] = model_med['netG'][key]
             for key in list(model_med['netG'].keys()):
@@ -53,7 +54,7 @@ def test(args, wandb_log):
         print('args.eval_model_ue', args.eval_model_ue)
         
         if args.eval_model_fine is None:
-            model_med = torch.load(args.eval_model, map_location='cuda:0')
+            model_med = torch.load(args.eval_model, map_location=args.device)
             for key in list(model_med['netG_fine'].keys()):
                 model_med['netG_fine'][key.replace('module.','')] = model_med['netG_fine'][key]
             for key in list(model_med['netG_fine'].keys()):
@@ -61,7 +62,7 @@ def test(args, wandb_log):
                     del model_med['netG_fine'][key]
             model.netG_fine.load_state_dict(model_med['netG_fine'])
         else:
-            model_med = torch.load(args.eval_model_fine, map_location='cuda:0')
+            model_med = torch.load(args.eval_model_fine, map_location=args.device)
             for key in list(model_med['netG'].keys()):
                 model_med['netG'][key.replace('module.','')] = model_med['netG'][key]
             for key in list(model_med['netG'].keys()):
@@ -72,6 +73,85 @@ def test(args, wandb_log):
         model.setup() 
         model.netG.eval()
         model.netG_fine.eval()
+
+        return model
+    
+
+import torch.onnx
+
+# CRITICAL: Force legacy exporter
+os.environ['TORCH_ONNX_USE_NEW_EXPORTER'] = '0'
+
+def export_to_onnx(model, args, onnx_path="sthn.onnx"):
+    # Force CPU
+    model = model.cpu()
+    model.eval()
+    
+    # Disable CUDA optimizations
+    torch.backends.cudnn.enabled = False
+    # torch.cuda.set_device('cpu')  # This doesn't work, but try:
+    
+    # Actually move all tensors to CPU
+    dummy1 = torch.randn(1, 3, 256, 256)
+    dummy2 = torch.randn(1, 3, 256, 256)
+    
+    # Use older API
+    with torch.no_grad():
+        torch.onnx.export(
+            model,
+            (dummy1, dummy2),
+            "model.onnx",
+            opset_version=11,
+            operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK
+        )
+
+
+
+def export_via_jit(model, args, onnx_path="sthn.onnx"):
+    # Move to CPU
+    model = model.cpu()
+    model.eval()
+    
+    # Create dummy inputs
+    dummy_img1 = torch.randn(1, 3, args.resize_width, args.resize_width)
+    dummy_img2 = torch.randn(1, 3, args.resize_width, args.resize_width)
+    
+    # Script the model
+    with torch.no_grad():
+        try:
+            # Try tracing first (more compatible)
+            traced_model = torch.jit.trace(model, (dummy_img1, dummy_img2))
+        except:
+            # Fall back to scripting
+            traced_model = torch.jit.script(model)
+        
+        # Save TorchScript
+        traced_model.save("sthn_scripted.pt")
+        
+        # Convert to ONNX from TorchScript
+        torch.onnx.export(
+            traced_model,
+            (dummy_img1, dummy_img2),
+            onnx_path,
+            input_names=['image1', 'image2'],
+            output_names=['output'],
+            opset_version=11,
+            export_params=True
+        )
+    
+    print(f"✅ Exported to {onnx_path}")
+
+
+def test(args, wandb_log):
+
+    model = load_sthn(args).cpu()
+    # model = load_sthn(args)
+
+    print(10 * '=')
+    print()
+
+    # export_to_onnx(model, args)
+    # export_via_jit(model, args)
 
     folder_name = "maps_results/farm"
     all_corners = []
@@ -95,7 +175,7 @@ def test(args, wandb_log):
             # اعمال مدل
             with torch.no_grad():
                 model.set_input(img1, img2)
-                model.forward()
+                model.forward(img1, img2)
                 four_pred = model.four_pred
     
             # آماده‌سازی نقاط مرجع
@@ -155,6 +235,7 @@ class Args:
         self.augment_type = 'center'
         self.identity = False
         self.device = torch.device('cuda:0')
+        self.device = torch.device('cpu')
         self.two_stages = True
         self.use_ue = False
         self.train_ue_method = 'train_end_to_end'

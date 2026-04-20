@@ -87,6 +87,7 @@ class IHN(nn.Module):
         )
         return flow
 
+
     def initialize_flow_4(self, img):
         N, C, H, W = img.shape
         coords0 = coords_grid(N, H//4, W//4).to(img.device)
@@ -99,26 +100,28 @@ class IHN(nn.Module):
         image2 = (image2.contiguous() - self.imagenet_mean) / self.imagenet_std
 
         # Extract
-        with autocast(enabled=self.args.mixed_precision):  # TODO
-            fmap1_64 = self.fnet1(image1)
-            fmap2_64 = self.fnet1(image2)
-        fmap1 = fmap1_64.float()
-        fmap2 = fmap2_64.float()
+        # with autocast(enabled=self.args.mixed_precision):  # TODO
+        #     fmap1_64 = self.fnet1(image1)
+        #     fmap2_64 = self.fnet1(image2)
+        # fmap1 = fmap1_64.float()
+        # fmap2 = fmap2_64.float()
+        fmap1 = self.fnet1(image1)
+        fmap2 = self.fnet1(image2)
 
         # Corr
         corr_fn = CorrBlock(fmap1, fmap2, num_levels=corr_level, radius=corr_radius)
 
         # Update
         coords0, coords1 = self.initialize_flow_4(image1)
-        sz = fmap1_64.shape
+        sz = fmap1.shape
         self.sz = sz
         four_point_disp = torch.zeros((sz[0], 2, 2, 2)).to(fmap1.device)
         four_point_predictions = []
         for itr in range(iters_lev0):
             corr = corr_fn(coords1)
             flow = coords1 - coords0
-            with autocast(enabled=self.args.mixed_precision):  # TODO
-                delta_four_point = self.update_block_4(corr, flow)
+            # with autocast(enabled=self.args.mixed_precision):  # TODO
+            delta_four_point = self.update_block_4(corr, flow)
                     
             last_four_point_disp = four_point_disp
             four_point_disp =  four_point_disp + delta_four_point
@@ -130,24 +133,27 @@ class IHN(nn.Module):
         return four_point_predictions, four_point_disp
 
 
-class STHN():
+class STHN(nn.Module):
     def __init__(self, args, for_training=False):
         super().__init__()
         self.args = args
         self.device = args.device
-        self.four_point_org_single = torch.zeros((1, 2, 2, 2)).to(self.device)
+        # self.four_point_org_single = torch.zeros((1, 2, 2, 2)).to(self.device)
+        self.register_buffer('four_point_org_single', torch.zeros((1, 2, 2, 2)))
         self.four_point_org_single[:, :, 0, 0] = torch.Tensor([0, 0]).to(self.device)
         self.four_point_org_single[:, :, 0, 1] = torch.Tensor([self.args.resize_width - 1, 0]).to(self.device)
         self.four_point_org_single[:, :, 1, 0] = torch.Tensor([0, self.args.resize_width - 1]).to(self.device)
         self.four_point_org_single[:, :, 1, 1] = torch.Tensor([self.args.resize_width - 1, self.args.resize_width - 1]).to(self.device)
-        self.four_point_org_large_single = torch.zeros((1, 2, 2, 2)).to(self.device)
+        # self.four_point_org_large_single = torch.zeros((1, 2, 2, 2)).to(self.device)
+        self.register_buffer('four_point_org_large_single', torch.zeros((1, 2, 2, 2)))
         self.four_point_org_large_single[:, :, 0, 0] = torch.Tensor([0, 0]).to(self.device)
         self.four_point_org_large_single[:, :, 0, 1] = torch.Tensor([self.args.database_size - 1, 0]).to(self.device)
         self.four_point_org_large_single[:, :, 1, 0] = torch.Tensor([0, self.args.database_size - 1]).to(self.device)
         self.four_point_org_large_single[:, :, 1, 1] = torch.Tensor([self.args.database_size - 1, self.args.database_size - 1]).to(self.device) # Only to calculate flow so no -1
+        
+        # Sub Modules
         self.netG = IHN(args, True)
         self.shift_flow_bbox = None
-        
         corr_level = args.corr_level
         args.corr_level = 2
         self.netG_fine = IHN(args, False)
@@ -173,15 +179,52 @@ class STHN():
         self.real_warped_image_2 = None
         self.image_1 = F.interpolate(self.image_1_ori, size=self.args.resize_width, mode='bilinear', align_corners=True, antialias=True)
         
-    def forward(self, for_training=False):
+    def forward(self, image1, image2):
         """Run forward pass; called by both functions <optimize_parameters> and <test>."""
         # time1 = time.time()
-        self.four_preds_list, self.four_pred = self.netG(image1=self.image_1, image2=self.image_2, iters_lev0=self.args.iters_lev0, corr_level=self.args.corr_level)
-        self.image_1_crop, delta, self.flow_bbox = self.get_cropped_st_images(self.image_1_ori, self.four_pred, self.args.fine_padding, self.args.detach, self.args.augment_two_stages)
+        # self.four_preds_list, self.four_pred = self.netG(image1=self.image_1, image2=self.image_2, iters_lev0=self.args.iters_lev0, corr_level=self.args.corr_level)
+        # self.image_1_crop, delta, self.flow_bbox = self.get_cropped_st_images(self.image_1_ori, self.four_pred, self.args.fine_padding, self.args.detach, self.args.augment_two_stages)
+        # self.image_2_crop = self.image_2
+        # self.four_preds_list_fine, self.four_pred_fine = self.netG_fine(image1=self.image_1_crop, image2=self.image_2_crop, iters_lev0=self.args.iters_lev1)
+        # self.four_preds_list, self.four_pred = self.combine_coarse_fine(self.four_preds_list, self.four_pred, self.four_preds_list_fine, self.four_pred_fine, delta, self.flow_bbox)
+        
+        # Interpolate input
+        image1_resized = F.interpolate(
+            image1, size=self.args.resize_width, 
+            mode='bilinear', align_corners=True, antialias=True
+        )
+        
+        # Coarse prediction
+        four_preds_list, four_pred = self.netG(
+            image1=image1_resized, 
+            image2=image2, 
+            iters_lev0=self.args.iters_lev0, 
+            corr_level=self.args.corr_level
+        )
+        
+        # Crop for fine stage
+        image1_crop, delta, flow_bbox = self.get_cropped_st_images(
+            image1, four_pred, self.args.fine_padding, 
+            self.args.detach, self.args.augment_two_stages
+        )
+        
+        # Fine prediction
+        four_preds_list_fine, four_pred_fine = self.netG_fine(
+            image1=image1_crop, 
+            image2=image2, 
+            iters_lev0=self.args.iters_lev1
+        )
+        
+        # Combine results
+        _, four_pred_combined = self.combine_coarse_fine(
+            four_preds_list, four_pred, 
+            four_preds_list_fine, four_pred_fine, 
+            delta, flow_bbox, for_training=False
+        )
 
-        self.image_2_crop = self.image_2
-        self.four_preds_list_fine, self.four_pred_fine = self.netG_fine(image1=self.image_1_crop, image2=self.image_2_crop, iters_lev0=self.args.iters_lev1)
-        self.four_preds_list, self.four_pred = self.combine_coarse_fine(self.four_preds_list, self.four_pred, self.four_preds_list_fine, self.four_pred_fine, delta, self.flow_bbox, for_training)
+        self.four_pred = four_pred_combined
+        
+        return four_pred_combined
 
     def get_cropped_st_images(self, image_1_ori, four_pred, fine_padding, detach=True, augment_two_stages=0):
         # From four_pred to bbox coordinates
@@ -229,7 +272,7 @@ class STHN():
         
         return image_1_crop, delta, flow_bbox
     
-    def combine_coarse_fine(self, four_preds_list, four_pred, four_preds_list_fine, four_pred_fine, delta, flow_bbox, for_training):
+    def combine_coarse_fine(self, four_preds_list, four_pred, four_preds_list_fine, four_pred_fine, delta, flow_bbox, for_training=False):
         alpha = self.args.database_size / self.args.resize_width
         kappa = delta / alpha
         four_preds_list_fine = [four_preds_list_fine_single * kappa + flow_bbox / alpha for four_preds_list_fine_single in four_preds_list_fine]
