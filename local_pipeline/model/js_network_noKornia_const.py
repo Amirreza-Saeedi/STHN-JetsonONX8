@@ -120,9 +120,9 @@ class IHN(nn.Module):
         for itr in range(iters_lev0):
             corr = corr_fn(coords1)
             flow = coords1 - coords0
-            with autocast(device_type='cuda', enabled=self.args.mixed_precision
-                          ):  # TODO
+            with autocast(device_type='cuda', enabled=self.args.mixed_precision):  # TODO
                 delta_four_point = self.update_block_4(corr, flow)
+            # delta_four_point = self.update_block_4(corr, flow)
                     
             last_four_point_disp = four_point_disp
             four_point_disp =  four_point_disp + delta_four_point
