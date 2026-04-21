@@ -1,3 +1,5 @@
+from pyexpat import model
+
 import numpy as np
 import os
 import torch
@@ -172,25 +174,36 @@ def test(args, wandb_log):
 
             return model
 
-        # model = CNN_64(128, init_dim=164)
 
-        # # load weights first
-        # model.load_state_dict(...)
+        def print_model_shapes(model):
+            for name, module in model.named_modules():
+                if isinstance(module, nn.Conv2d):
+                    print(name, module.in_channels, module.out_channels)
 
-        # parameters = sum(p.numel() for p in model.netG.update_block_4.cnn.parameters())
-        # print(parameters)
-        # # prune
-        # model.netG.update_block_4.cnn = structured_prune_model(model.netG.update_block_4.cnn, amount=0.6)
+        print_model_shapes(model.netG.update_block_4.cnn)
 
-        # model.netG.update_block_4.cnn = surgery_cnn64(model.netG.update_block_4.cnn)
+        parameters = sum(p.numel() for p in model.netG.update_block_4.cnn.parameters())
+        print(parameters)
+        # prune
+        model.netG.update_block_4.cnn = structured_prune_model(model.netG.update_block_4.cnn, amount=0.5    )
 
-        # # prune
-        # model.netG_fine.update_block_4.cnn = structured_prune_model(model.netG_fine.update_block_4.cnn, amount=0.3)
+        model.netG.update_block_4.cnn = surgery_cnn64(model.netG.update_block_4.cnn)
 
-        # model.netG_fine.update_block_4.cnn = surgery_cnn64(model.netG_fine.update_block_4.cnn)
+        # prune
+        model.netG_fine.update_block_4.cnn = structured_prune_model(model.netG_fine.update_block_4.cnn, amount=0.5)
 
-        # parameters = sum(p.numel() for p in model.netG.update_block_4.cnn.parameters())
-        # print(parameters)
+        model.netG_fine.update_block_4.cnn = surgery_cnn64(model.netG_fine.update_block_4.cnn)
+
+        parameters = sum(p.numel() for p in model.netG.update_block_4.cnn.parameters())
+        print(parameters)
+
+        def print_model_shapes(model):
+            for name, module in model.named_modules():
+                if isinstance(module, nn.Conv2d):
+                    print(name, module.in_channels, module.out_channels)
+
+        print_model_shapes(model.netG.update_block_4.cnn)
+
 
         model.setup() 
         model.netG.eval()
@@ -198,6 +211,7 @@ def test(args, wandb_log):
             model.netD.eval()
         if args.two_stages:
             model.netG_fine.eval()
+
         # js_utils.print_gpu_mem('After Eval')
     # else:
     #     model = None
@@ -249,7 +263,7 @@ def test(args, wandb_log):
     time_round1_ihn2 = 0
 
     N = 108 # number of samples
-    N = 10 # number of samples
+    N = 108 # number of samples
     T = 31 # tiles in each x dir
     TH = 9
     SAT = 12
@@ -284,11 +298,12 @@ def test(args, wandb_log):
                 four_pred = model.four_pred
 
             # آماده‌سازی نقاط مرجع
-            four_point_org_single = torch.zeros((1, 2, 2, 2))
-            four_point_org_single[:, :, 0, 0] = torch.Tensor([0, 0])
-            four_point_org_single[:, :, 0, 1] = torch.Tensor([args.resize_width - 1, 0])
-            four_point_org_single[:, :, 1, 0] = torch.Tensor([0, args.resize_width - 1])
-            four_point_org_single[:, :, 1, 1] = torch.Tensor([args.resize_width - 1, args.resize_width - 1])
+            four_point_org_single = torch.tensor(
+                [[[[0, 0], [args.resize_width - 1, 0]],
+                [[0, args.resize_width - 1], [args.resize_width - 1, args.resize_width - 1]]]],
+                device="cuda:0",
+                dtype=torch.float16
+            )  # shape (1,2,2,2)
             
             # پردازش خروجی
             four_point_1 = four_pred.cpu().detach() + four_point_org_single
@@ -310,6 +325,7 @@ def test(args, wandb_log):
             elapsed = end_time - start_time
             times.append(elapsed)
             print(f"✅ Done for image {i + 1}, {elapsed:.3}")
+
             if i == 0:
                 time_round1_ihn1 = model.netG.times.copy()
                 time_round1_ihn2 = model.netG_fine.times.copy()
