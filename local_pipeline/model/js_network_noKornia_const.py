@@ -139,18 +139,7 @@ class STHN(nn.Module):
         super().__init__()
         self.args = args
         self.device = args.device
-        # self.four_point_org_single = torch.zeros((1, 2, 2, 2)).to(self.device)
-        # self.four_point_org_single[:, :, 0, 0] = torch.Tensor([0, 0]).to(self.device)
-        # self.four_point_org_single[:, :, 0, 1] = torch.Tensor([self.args.resize_width - 1, 0]).to(self.device)
-        # self.four_point_org_single[:, :, 1, 0] = torch.Tensor([0, self.args.resize_width - 1]).to(self.device)
-        # self.four_point_org_single[:, :, 1, 1] = torch.Tensor([self.args.resize_width - 1, self.args.resize_width - 1]).to(self.device)
-        # self.four_point_org_large_single = torch.zeros((1, 2, 2, 2)).to(self.device)
-        # self.four_point_org_large_single[:, :, 0, 0] = torch.Tensor([0, 0]).to(self.device)
-        # self.four_point_org_large_single[:, :, 0, 1] = torch.Tensor([self.args.database_size - 1, 0]).to(self.device)
-        # self.four_point_org_large_single[:, :, 1, 0] = torch.Tensor([0, self.args.database_size - 1]).to(self.device)
-        # self.four_point_org_large_single[:, :, 1, 1] = torch.Tensor([self.args.database_size - 1, self.args.database_size - 1]).to(self.device) # Only to calculate flow so no -1
         
-        # FIXED: Create buffers directly on the correct device
         four_point_org_single = torch.zeros((1, 2, 2, 2), device=self.device)
         four_point_org_single[:, :, 0, 0] = torch.tensor([0, 0], device=self.device)
         four_point_org_single[:, :, 0, 1] = torch.tensor([self.args.resize_width - 1, 0], device=self.device)
@@ -186,21 +175,15 @@ class STHN(nn.Module):
         model = model.to(self.device)
         return model
     
-    def set_input(self, A, B, flow_gt=None):
-        self.image_1_ori = A.to(self.device, non_blocking=True)
-        self.image_2 = B.to(self.device, non_blocking=True)
+    # def set_input(self, A, B, flow_gt=None):
+    #     self.image_1_ori = A.to(self.device, non_blocking=True)
+    #     self.image_2 = B.to(self.device, non_blocking=True)
 
-        self.real_warped_image_2 = None
-        self.image_1 = F.interpolate(self.image_1_ori, size=self.args.resize_width, mode='bilinear', align_corners=True, antialias=True)
+    #     self.real_warped_image_2 = None
+    #     self.image_1 = F.interpolate(self.image_1_ori, size=self.args.resize_width, mode='bilinear', align_corners=True, antialias=True)
         
     def forward(self, image1, image2):
         """Run forward pass; called by both functions <optimize_parameters> and <test>."""
-        # time1 = time.time()
-        # self.four_preds_list, self.four_pred = self.netG(image1=self.image_1, image2=self.image_2, iters_lev0=self.args.iters_lev0, corr_level=self.args.corr_level)
-        # self.image_1_crop, delta, self.flow_bbox = self.get_cropped_st_images(self.image_1_ori, self.four_pred, self.args.fine_padding, self.args.detach, self.args.augment_two_stages)
-        # self.image_2_crop = self.image_2
-        # self.four_preds_list_fine, self.four_pred_fine = self.netG_fine(image1=self.image_1_crop, image2=self.image_2_crop, iters_lev0=self.args.iters_lev1)
-        # self.four_preds_list, self.four_pred = self.combine_coarse_fine(self.four_preds_list, self.four_pred, self.four_preds_list_fine, self.four_pred_fine, delta, self.flow_bbox)
         
         # FIXED: Move input tensors to the model's device
         device = next(self.parameters()).device

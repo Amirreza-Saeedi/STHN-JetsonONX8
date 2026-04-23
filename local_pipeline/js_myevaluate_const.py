@@ -27,6 +27,8 @@ import commons
 import logging
 import wandb
 from PIL import Image 
+import torch.profiler
+
 base_transform = transforms.Compose(
             [
                 transforms.Resize([256,256]),
@@ -181,13 +183,21 @@ def test(args, wandb_log):
                 # خواندن تصاویر
                 img1 = F.to_tensor(Image.open(img1_path).convert("RGB")).unsqueeze(0)
                 img2 = (base_transform(query_transform(Image.open(img2_path)))).unsqueeze(0)
+                # torch.cuda.synchronize()
                 start_time = time.time()
                 # اعمال مدل
                 # with torch.no_grad():
                 # model.set_input(img1, img2)
                 four_pred = model.forward(img1, img2)
-                # model.forward()
-                # four_pred = model.four_pred
+
+                # with torch.profiler.profile(
+                #     activities=[torch.profiler.ProfilerActivity.CUDA, torch.profiler.ProfilerActivity.CPU],
+                #     record_shapes=True,
+                #     with_stack=True
+                # ) as prof:
+                #     four_pred = model(img1, img2)
+
+                # print(prof.key_averages().table(sort_by="cuda_time_total", row_limit=10))
                 
                 # پردازش خروجی
                 four_point_1 = four_pred.detach() + four_point_org_single
@@ -197,6 +207,7 @@ def test(args, wandb_log):
                 center = tuple(center[0].tolist())
                 # print(center)
                 # print(four_point_1_mul6)
+                # torch.cuda.synchronize()
                 end_time = time.time()
                 elapsed = end_time - start_time
                 times.append(elapsed)
