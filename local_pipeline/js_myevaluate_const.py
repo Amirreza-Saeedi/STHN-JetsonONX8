@@ -158,6 +158,14 @@ def test(args, wandb_log):
     all_corners = []
     times = []
 
+    # آماده‌سازی نقاط مرجع
+    # Create reference points on GPU
+    four_point_org_single = torch.zeros((1, 2, 2, 2), device=args.device)
+    four_point_org_single[:, :, 0, 0] = torch.Tensor([0, 0]).to(args.device)
+    four_point_org_single[:, :, 0, 1] = torch.Tensor([args.resize_width - 1, 0]).to(args.device)
+    four_point_org_single[:, :, 1, 0] = torch.Tensor([0, args.resize_width - 1]).to(args.device)
+    four_point_org_single[:, :, 1, 1] = torch.Tensor([args.resize_width - 1, args.resize_width - 1]).to(args.device)
+
     N = 108 # number of samples
     # N = 50 # number of samples
     T = 31 # tiles in each x dir
@@ -176,20 +184,13 @@ def test(args, wandb_log):
                 start_time = time.time()
                 # اعمال مدل
                 # with torch.no_grad():
-                model.set_input(img1, img2)
-                model.forward(img1, img2)
+                # model.set_input(img1, img2)
+                four_pred = model.forward(img1, img2)
                 # model.forward()
-                four_pred = model.four_pred
-        
-                # آماده‌سازی نقاط مرجع
-                four_point_org_single = torch.zeros((1, 2, 2, 2))
-                four_point_org_single[:, :, 0, 0] = torch.Tensor([0, 0])
-                four_point_org_single[:, :, 0, 1] = torch.Tensor([args.resize_width - 1, 0])
-                four_point_org_single[:, :, 1, 0] = torch.Tensor([0, args.resize_width - 1])
-                four_point_org_single[:, :, 1, 1] = torch.Tensor([args.resize_width - 1, args.resize_width - 1])
+                # four_pred = model.four_pred
                 
                 # پردازش خروجی
-                four_point_1 = four_pred.cpu().detach() + four_point_org_single
+                four_point_1 = four_pred.detach() + four_point_org_single
                 four_point_1 = four_point_1.flatten(2).permute(0, 2, 1).contiguous()
                 four_point_1_mul6 = four_point_1 * 6
                 center = four_point_1_mul6.mean(dim=1)  # شکل (1,2)
